@@ -44,5 +44,8 @@
     <ClCompile Include="SLAM.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="TatenoSLAM.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>

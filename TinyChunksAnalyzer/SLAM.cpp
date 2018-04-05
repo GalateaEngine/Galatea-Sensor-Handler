@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 
 int numLandmarks;
 int numDimensions;
@@ -442,3 +442,5 @@ void Extended_Information_Filter(cv::Mat Landmarks, cv::Mat controls)
 	omega = omegaBar;
 	psi = psiBar;
 }
+
+
