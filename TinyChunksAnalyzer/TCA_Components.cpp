@@ -67,7 +67,7 @@ bool TCA_Video::processFrameData(cv::Mat data)
 			{
 				if (lastPixel.val[c] * colourFudgeMax > pixel.val[c] && lastPixel.val[c] * colourFudgeMin < pixel.val[c]) matches++;
 			}
-				
+
 			if (matches < 3)
 			{
 				cv::Point tpoint = cv::Point(rowIndex, i);
@@ -76,7 +76,7 @@ bool TCA_Video::processFrameData(cv::Mat data)
 			}
 			lastPixel = pixel;
 		}
-		
+
 	}
 	pSet = changeList;
 	//while points are in list
@@ -176,8 +176,10 @@ bool TCA_Video::update()
 			return false;
 		}
 		cv::Mat edge;
+		Mat waste;
 		cv::cvtColor(frame, edge, CV_BGR2GRAY);
-		cv::Canny(edge, edge, 10, 100);
+		double otsu_thresh_val = cv::threshold(edge, waste, 0, 255, CV_THRESH_BINARY | CV_THRESH_OTSU);
+		cv::Canny(edge, edge, otsu_thresh_val * 0.2, otsu_thresh_val);
 		imshow("VideoFeed", edge);
 		//cv::waitKey(10000);
 		//get frame difference

@@ -54,12 +54,20 @@ cv::Mat p(cv::Mat a, double paramDelta = 1, double paramE = 1)
 		a.at<double>(0, 1) = paramDelta / sqrte;        // rho'(e)  = delta / sqrt(e)
 		a.at<double>(0, 2) = -0.5 * a.at<double>(0, 1) / paramE;    // rho''(e) = -1 / (2*e^(3/2)) = -1/2 * (delta/e) / e
 	}
+	return a;
 }
 
 cv::Mat sigma(cv::Mat a)
 {
 	//measure residual incertainty
 	//how
+	return a;
+}
+
+cv::Mat r(double pixel, cv::Mat a)
+{
+
+	return a;
 }
 
 cv::Mat E(cv::Mat Tkit, cv::Mat currentFrame)

@@ -161,7 +161,8 @@
     <ClInclude Include="TCA_Core.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="SLAM.cpp" />
+    <ClCompile Include="KalmanSLAM.cpp" />
+    <ClCompile Include="GraphSLAM.cpp" />
     <ClCompile Include="stdafx.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Create</PrecompiledHeader>

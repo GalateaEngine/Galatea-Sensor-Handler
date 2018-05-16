@@ -41,10 +41,13 @@
     <ClCompile Include="TCA_Components.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="SLAM.cpp">
+    <ClCompile Include="TatenoSLAM.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="TatenoSLAM.cpp">
+    <ClCompile Include="KalmanSLAM.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="GraphSLAM.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
