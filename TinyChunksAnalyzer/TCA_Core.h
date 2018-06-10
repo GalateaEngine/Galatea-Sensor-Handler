@@ -3,7 +3,7 @@
 class TCA_Core
 {
 public:
-	bool VidEnabled = false;
+	bool VidEnabled = true;
 	TCA_Video vid;
 	TCA_Core(bool videoEnabled, bool audioEnabled, bool textEnabled);
 

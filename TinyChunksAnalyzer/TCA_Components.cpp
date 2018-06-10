@@ -13,7 +13,9 @@ TCA_Video::TCA_Video()
 		ready = false;
 	objects = 0;
 	objectMap.empty();
-	cv::namedWindow("VideoFeed");
+	cv::namedWindow("VideoFeed1");
+	cv::namedWindow("VideoFeed2");
+	cv::namedWindow("VideoFeed3");
 }
 
 TCA_Video::~TCA_Video()
@@ -80,82 +82,82 @@ bool TCA_Video::processFrameData(cv::Mat data)
 	}
 	pSet = changeList;
 	//while points are in list
-	//while (changeList.size() > 0)
-	//{
-	//	//get top point
-	//	cv::Point tpoint = *(changeList.begin());
-	//	//set origin as top point
-	//	cv::Point origin = tpoint;
-	//	//create new object and add first point
-	//	TCA_Object obj;
-	//	obj.numpoints++;
-	//	obj.points.push_back(tpoint);
-	//	changeList.erase(tpoint);
-	//	//set bounding box limits to origin
-	//	obj.x = origin.x;
-	//	obj.y = origin.y;
-	//	obj.height = 1;
-	//	obj.width = 1;
-	//	//store if we've used the origin seek trick
-	//	bool resetOrigin = false;
-	//	//while still finding point
-	//	bool running = true;
-	//	while (running)
-	//	{
-	//		//check all immediate surrounding locations in change array
-	//		cv::Point hit;
-	//		bool foundPoint = findNearbyPoint(tpoint, width, height, changeList, hit);
-	//		//if no hit go to origin and continue searching from there, set origin to top and top to found point
-	//		if (!foundPoint && !resetOrigin)
-	//		{
-	//			resetOrigin = true;
-	//			foundPoint = findNearbyPoint(origin, width, height, changeList, hit);
-	//			origin = tpoint;
-	//		}
-	//		//if still no hit search whole array list for closest node with colour match (later junk)
-	//		//if hit
-	//		if (foundPoint)
-	//		{
-	//			//updated colour change average
-	//			//add hit to object
-	//			obj.numpoints++;
-	//			obj.points.push_back(hit);
-	//			//add line between top point and hit to object
-	//			Line line;
-	//			line.start = tpoint;
-	//			line.end = hit;
-	//			//colour pixel need to be determined by the relative spacing of the two points
-	//			//line.colourDif = norm(data.at<Vec3b>(Point(hit.x + xp, hit.y + yp)), data.at<Vec3b>(Point(hit.x - xp, hit.y - yp)), CV_L2);
-	//			obj.lines.push_back(line);
-	//			//remove hit from list
-	//			changeList.erase(hit);
-	//			//changeMap.erase(hit); //no need for this, waste of time
-	//			//expand bounding box
-	//			if (hit.x > obj.width + obj.x) obj.width = hit.x - obj.x;
-	//			if (hit.y > obj.height + obj.y) obj.height = hit.y - obj.y;
-	//			if (hit.x < obj.x) obj.x = hit.x;
-	//			if (hit.y < obj.y) obj.y = hit.y;
-	//			//set top point to hit
-	//			tpoint = hit;
-	//		}
-	//		//else
-	//		else
-	//		{
-	//			running = false;
-	//			//draw line between origin and top point
-	//			Line line;
-	//			line.start = tpoint;
-	//			line.end = origin;
-	//			//colour pixel need to be determined by the relative spacing of the two points
-	//			//line.colourDif = norm(data.at<Vec3b>(Point(hit.x + xp, hit.y + yp)), data.at<Vec3b>(Point(hit.x - xp, hit.y - yp)), CV_L2);
-	//			obj.lines.push_back(line);
-	//			//set top point to empty
-	//		}
+	while (changeList.size() > 0)
+	{
+		//get top point
+		cv::Point tpoint = *(changeList.begin());
+		//set origin as top point
+		cv::Point origin = tpoint;
+		//create new object and add first point
+		TCA_Object obj;
+		obj.numpoints++;
+		obj.points.push_back(tpoint);
+		changeList.erase(tpoint);
+		//set bounding box limits to origin
+		obj.x = origin.x;
+		obj.y = origin.y;
+		obj.height = 1;
+		obj.width = 1;
+		//store if we've used the origin seek trick
+		bool resetOrigin = false;
+		//while still finding point
+		bool running = true;
+		while (running)
+		{
+			//check all immediate surrounding locations in change array
+			cv::Point hit;
+			bool foundPoint = findNearbyPoint(tpoint, width, height, changeList, hit);
+			//if no hit go to origin and continue searching from there, set origin to top and top to found point
+			if (!foundPoint && !resetOrigin)
+			{
+				resetOrigin = true;
+				foundPoint = findNearbyPoint(origin, width, height, changeList, hit);
+				origin = tpoint;
+			}
+			//if still no hit search whole array list for closest node with colour match (later junk)
+			//if hit
+			if (foundPoint)
+			{
+				//updated colour change average
+				//add hit to object
+				obj.numpoints++;
+				obj.points.push_back(hit);
+				//add line between top point and hit to object
+				Line line;
+				line.start = tpoint;
+				line.end = hit;
+				//colour pixel need to be determined by the relative spacing of the two points
+				//line.colourDif = norm(data.at<Vec3b>(Point(hit.x + xp, hit.y + yp)), data.at<Vec3b>(Point(hit.x - xp, hit.y - yp)), CV_L2);
+				obj.lines.push_back(line);
+				//remove hit from list
+				changeList.erase(hit);
+				//changeMap.erase(hit); //no need for this, waste of time
+				//expand bounding box
+				if (hit.x > obj.width + obj.x) obj.width = hit.x - obj.x;
+				if (hit.y > obj.height + obj.y) obj.height = hit.y - obj.y;
+				if (hit.x < obj.x) obj.x = hit.x;
+				if (hit.y < obj.y) obj.y = hit.y;
+				//set top point to hit
+				tpoint = hit;
+			}
+			//else
+			else
+			{
+				running = false;
+				//draw line between origin and top point
+				Line line;
+				line.start = tpoint;
+				line.end = origin;
+				//colour pixel need to be determined by the relative spacing of the two points
+				//line.colourDif = norm(data.at<Vec3b>(Point(hit.x + xp, hit.y + yp)), data.at<Vec3b>(Point(hit.x - xp, hit.y - yp)), CV_L2);
+				obj.lines.push_back(line);
+				//set top point to empty
+			}
 
-	//	}
-	//	objectMap.emplace(objects, obj);
-	//	objects++;
-	//}
+		}
+		objectMap.emplace(objects, obj);
+		objects++;
+	}
 	return true;
 }
 
@@ -163,13 +165,15 @@ bool TCA_Video::processFrameData(cv::Mat data)
 
 bool TCA_Video::update()
 {
-	if (ready)
+	//if (ready)
 	{
 		//REMOVE THIS LATER
 		objectMap.clear();
 		objects = 0;
 		cv::Mat frame;
-		cap >> frame;
+		//cap >> frame;
+		frame = imread("./image1.jpg", CV_LOAD_IMAGE_COLOR);
+		imshow("VideoFeed1", frame);
 		if (frame.empty())
 		{
 			ready = false;
@@ -180,26 +184,26 @@ bool TCA_Video::update()
 		cv::cvtColor(frame, edge, CV_BGR2GRAY);
 		double otsu_thresh_val = cv::threshold(edge, waste, 0, 255, CV_THRESH_BINARY | CV_THRESH_OTSU);
 		cv::Canny(edge, edge, otsu_thresh_val * 0.2, otsu_thresh_val);
-		imshow("VideoFeed", edge);
-		//cv::waitKey(10000);
+		imshow("VideoFeed2", edge);
 		//get frame difference
-		//processFrameData(frame); //later processFrameData(changedFrame);
-		//						 //draw each object's bounding box
-		////for (int i = 0; i < objects; i++)
-		//{
-		//	cv::Scalar colour(0, 255, 0);
-		//	//cv::Rect boundingRect(objectMap[i].x, objectMap[i].y, objectMap[i].width, objectMap[i].height);
-		//	//rectangle(frame, boundingRect, colour);
-		//	/*for(int j =0; j < objectMap[i].points.size(); j++)
-		//		cv::circle(frame, cv::Point(objectMap[i].points[j].x, objectMap[i].points[j].y), 2, colour);*/
-		//	for (auto f : pSet) {
-		//		cv::circle(frame, f, 2, colour);
-		//	}
-		//}
-		//imshow("VideoFeed", frame);
+		processFrameData(frame); //later processFrameData(changedFrame);
+								 //draw each object's bounding box
+		for (int i = 0; i < objects; i++)
+		{
+			cv::Scalar colour(0, 255, 0);
+			//cv::Rect boundingRect(objectMap[i].x, objectMap[i].y, objectMap[i].width, objectMap[i].height);
+			//rectangle(frame, boundingRect, colour);
+			/*for(int j =0; j < objectMap[i].points.size(); j++)
+				cv::circle(frame, cv::Point(objectMap[i].points[j].x, objectMap[i].points[j].y), 2, colour);*/
+			for (auto f : pSet) {
+				cv::circle(frame, f, 2, colour);
+			}
+		}
+		imshow("VideoFeed3", frame);
+		cv::waitKey(10000);
 	}
-	else
+	/*else
 	{
 		return false;
-	}
+	}*/
 }
