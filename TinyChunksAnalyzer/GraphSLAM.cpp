@@ -9,9 +9,13 @@ public:
 	Mat cameraTransformationAndScaleS; //taken and scaled with repsect to the world frame W aka the first frame. This is an element of Sim(3)
 };
 
+//prototypes
 Mat makeHomo(Mat input);
 Mat piInv(Mat input, double invDepth);
 Mat pi(Mat input);
+double calcPhotometricResidual(Point pixleU, Point projectedPoint,KeyFrame keyframe, Mat image, double rmean);
+double HuberNorm(double x, double epsilon);
+Mat projectWorldPointToCameraPointU(Mat cameraParamsK, Mat cameraPoseT, Mat wPointP);
 
 //for holding processed pixels that appear in both the keyframe and the current frame
 class pPixel
@@ -28,6 +32,7 @@ public:
 	double derivatives[16];
 };
 
+double pixelIntensityNoise = 1.0;
 double findY(Point pixelU, Point projectedPoint, KeyFrame keyframe, Mat image, double rmean)
 {
 	//calc photometric residue
@@ -70,6 +75,7 @@ Mat deHomo(Mat xbar)
 			x.at<double>(i, j) = xbar.at<double>(i, j) / scale;
 		}
 	}
+	return x;
 }
 
 void BuildLinearSystem(Mat &H, Mat &b, Mat x, Mat jacobian, Mat error, Mat information)
@@ -156,7 +162,7 @@ Mat SolveSparseMatrix(Mat H, Mat b)
 double CalcErrorVal(std::vector<pPixel> residuals)
 {
 	double error = 0;
-	for (int i = 0; i < residuals.size; i++)
+	for (int i = 0; i < residuals.size(); i++)
 	{
 		error += residuals[i].residualSum * residuals[i].residualSum;
 	}
@@ -188,9 +194,9 @@ std::vector<pPixel> ComputeJacobian(Mat cameraParams, Mat cameraPose, KeyFrame k
 			Point pixelU = Point(x, y);
 			double keyDepthAtU = keyframe.inverseDepthD.at<double>(pixelU);
 			//project into world space
-			Mat p = keyframe.cameraTransformationAndScaleS.t() * piInv(makeHomo(pixelU.operator cv::Vec<int, 2>), keyDepthAtU);
+			Mat p = keyframe.cameraTransformationAndScaleS.t() * piInv(makeHomo(Mat(pixelU)), keyDepthAtU);
 			//project into new image
-			Point projectedPoint = projectWorldPointToCameraPointU(cameraParams, cameraPose, p).operator cv::Vec<double, 2>;
+			Point projectedPoint = Point(projectWorldPointToCameraPointU(cameraParams, cameraPose, p));
 			//do a bounds check, continue if we are out of range
 			if (projectedPoint.x < 0 || projectedPoint.y < 0 || projectedPoint.x > image.rows || projectedPoint.y > image.cols) continue;
 			//set inital pixel
@@ -229,9 +235,9 @@ std::vector<pPixel> ComputeResiduals(Mat cameraParams, Mat cameraPose, KeyFrame 
 			Point pixelU = Point(x, y);
 			double keyDepthAtU = keyframe.inverseDepthD.at<double>(pixelU);
 			//project into world space
-			Mat p = keyframe.cameraTransformationAndScaleS.t() * piInv(makeHomo(pixelU.operator cv::Vec<int, 2>), keyDepthAtU);
+			Mat p = keyframe.cameraTransformationAndScaleS.t() * piInv(makeHomo(Mat(pixelU)), keyDepthAtU);
 			//project into new image
-			Point projectedPoint = projectWorldPointToCameraPointU(cameraParams, cameraPose, p).operator cv::Vec<double, 2>;
+			Point projectedPoint = Point(projectWorldPointToCameraPointU(cameraParams, cameraPose, p));
 			//do a bounds check, continue if we are out of range
 			if (projectedPoint.x < 0 || projectedPoint.y < 0 || projectedPoint.x > image.rows || projectedPoint.y > image.cols) continue;
 			//set inital pixel
@@ -291,11 +297,11 @@ class PoseGraph
 //predicts new position based on dampened approximate velocity
 void forwardPredictPosition(Mat &lastPos, Mat &Velocity)
 {
-	float dt = 0.5;
-	float a = 0.85, b = 0.005;
+	double dt = 0.5;
+	double a = 0.85, b = 0.005;
 
-	float xk, vk, rk;
-	float xm;
+	double xk, vk, rk;
+	double xm;
 
 	for (int i = 0; i < 6; i++)
 	{
@@ -361,7 +367,7 @@ double HuberNorm(double x, double epsilon)
 
 Mat CalcErrorVec(std::vector<pPixel> pixels)
 {
-	int objects = pixels.size;
+	int objects = pixels.size();
 	Mat errorVec(1, objects, CV_64FC1);
 	//calc difference
 	for (int x = 0; x < objects; x++)
@@ -379,7 +385,7 @@ double calcPhotometricResidual(Point pixelU, Point projectedPoint, KeyFrame keyf
 	return r;
 }
 
-void ComputeMedianResidualAndCorrectedPhotometricResiduals(Mat cameraPose, Mat image, KeyFrame kf, std::vector<pPixel> & results, double & median)
+void ComputeMedianResidualAndCorrectedPhotometricResiduals(Mat cameraParams, Mat cameraPose, Mat image, KeyFrame kf, std::vector<pPixel> & results, double & median)
 {
 	// max heap to store the higher half elements 
 	std::priority_queue<double> max_heap_left;
@@ -395,9 +401,9 @@ void ComputeMedianResidualAndCorrectedPhotometricResiduals(Mat cameraPose, Mat i
 			Point pixelU = Point(i, j);
 			double keyDepthAtU = kf.inverseDepthD.at<double>(pixelU);
 			//project into world space
-			Mat p = kf.cameraTransformationAndScaleS.t() * piInv(makeHomo(pixelU.operator cv::Vec<int, 2>), keyDepthAtU);
+			Mat p = kf.cameraTransformationAndScaleS.t() * piInv(makeHomo(Mat(pixelU)), keyDepthAtU);
 			//project into new image
-			Point projectedPoint = projectWorldPointToCameraPointU(cameraParams, cameraPose, p).operator cv::Vec<double, 2>;
+			Point projectedPoint = Point(projectWorldPointToCameraPointU(cameraParams, cameraPose, p));
 			//do a bounds check, continue if we are out of range
 			if (projectedPoint.x < 0 || projectedPoint.y < 0 || projectedPoint.x > image.rows || projectedPoint.y > image.cols) continue;
 			//set inital pixel
@@ -469,7 +475,7 @@ Mat TransformJacobian(Mat jacobian, Mat residuals)
 	return JTJiJT * residuals; // (JT * J)^-1 * JT * r
 }
 
-double pixelIntensityNoise = 1.0;
+
 Mat cameraParams;
 Mat CalcGNPosOptimization(Mat image, KeyFrame keyframe)
 {
@@ -487,7 +493,7 @@ Mat CalcGNPosOptimization(Mat image, KeyFrame keyframe)
 		//calculate all residuals and the sum
 		std::vector<pPixel> residuals;
 		double rmean = 0;
-		ComputeMedianResidualAndCorrectedPhotometricResiduals(cameraPose, image, keyframe, residuals, rmean);
+		ComputeMedianResidualAndCorrectedPhotometricResiduals(cameraParams, cameraPose, image, keyframe, residuals, rmean);
 		//calculate error with current residuals
 		//Mat errorVec = CalcErrorVec(residuals);
 		double error = CalcErrorVal(residuals);
@@ -496,9 +502,9 @@ Mat CalcGNPosOptimization(Mat image, KeyFrame keyframe)
 		std::vector<pPixel> jacobianRes = ComputeJacobian(cameraParams, cameraPose, keyframe, image, rmean, image.cols * image.rows);
 
 		//place jacobians and residuals into matrices
-		Mat jacobianMat(jacobianRes.size, 16, CV_64FC1);
-		Mat residualsMat(jacobianRes.size, 1, CV_64FC1);
-		for (int i = 0; i < jacobianRes.size; i++)
+		Mat jacobianMat(jacobianRes.size(), 16, CV_64FC1);
+		Mat residualsMat(jacobianRes.size(), 1, CV_64FC1);
+		for (int i = 0; i < jacobianRes.size(); i++)
 		{
 			residualsMat.at<double>(i, 0) = residuals[i].residualSum;
 			for (int j = 0; j < 16; j++)
@@ -538,6 +544,86 @@ Mat CalcGNPosOptimization(Mat image, KeyFrame keyframe)
 	return cameraPose;
 }
 
+class QuadTreeNode
+{
+public:
+	double avgIntensity;
+	int numChildren;
+	QuadTreeNode *parent;
+	QuadTreeNode *children[4];
+};
+
+int quadTreeDepth = 4;
+double thresholdSquared = 0.01;//10% post square
+void ComputeQuadtreeDepths(Mat image)
+{
+	int numPixles = image.rows * image.cols;
+	int treeSize = numPixles;
+	int tpixels = numPixles;
+	for (int i = 0; i < quadTreeDepth; i++)
+	{
+		tpixels /= 4;
+		treeSize += tpixels;
+	}
+	int index = treeSize - numPixles;
+	std::vector<QuadTreeNode> nodes(treeSize);
+	
+	//place image into quadtree
+	for (int x = 0; x < image.rows; x++)
+	{
+		for (int y = 0; y < image.cols; y++)
+		{
+			QuadTreeNode leaf;
+			leaf.numChildren = 0;
+			leaf.avgIntensity = image.at<double>(x, y);
+			nodes[index] = leaf;
+			index++;
+		}
+	}
+
+	//construct higher levels of the quad tree
+	int groupSize = treeSize;
+	index = treeSize - numPixles;
+	for (int l = 0; l < quadTreeDepth - 1; l++)
+	{
+		groupSize /= 4;
+		for (int g = 0; g < groupSize; g++)
+		{
+			QuadTreeNode branch;
+			branch.numChildren = 4;
+			double avgIntensity = 0.0;
+			//set children from the lower group
+			for (int i = 0; i < 4; i++)
+			{
+				branch.children[i] = &nodes[index + (groupSize * 4) + i];
+				branch.children[i]->parent = &branch;
+				avgIntensity += branch.children[i]->avgIntensity;
+			}
+			branch.avgIntensity /= 4;
+
+			//check if we need to trim branch
+			bool trim = true;
+			for (int i = 0; i < 4; i++)
+			{
+				double percent = branch.avgIntensity / branch.children[i]->avgIntensity;
+				percent *= percent;
+				if (percent > thresholdSquared)
+				{
+					trim = false;
+					break;
+				}
+			}
+
+			//trim if nesseccary
+			if (trim) branch.numChildren = 0;
+
+			//store branch
+			nodes[(index - groupSize) + g] = branch;
+		}
+		index -= groupSize;
+	}
+}
+
 Mat lastPos;
 Mat velocity;
 PoseGraph keyframes;
@@ -550,12 +636,9 @@ KeyFrame lastKey;
 Mat LS_Graph_SLAM(Mat cameraFrame)
 {
 
-
 	Mat position = CalcGNPosOptimization(cameraFrame, lastKey);
 
-	//construct expected pos mat based on cameras predicted position (load in the points that SHOULD be in view)
-	//store all keyframe points into temp array
-	//match to existing dots based on movement prediction
+	//construct depth quadtrees
 
 
 	//construct information matrix
@@ -569,7 +652,7 @@ Mat LS_Graph_SLAM(Mat cameraFrame)
 	//recalculate aproximate velocity
 
 	//return aprox position 
-
+	return position;
 }
 
 //Sets up matrices and other things

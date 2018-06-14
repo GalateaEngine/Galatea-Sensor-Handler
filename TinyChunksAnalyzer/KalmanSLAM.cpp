@@ -238,19 +238,19 @@ int doubleDim = numDimensions * 2;
 
 //unscented parameters
 double kappa = 3;
-double alpha = 0.5;
+double kalpha = 0.5;
 double lambda;
 double beta = 2;
 
 void setup_UKF()
 {
-	lambda = alpha * alpha;
+	lambda = kalpha * kalpha;
 	lambda *= (numDimensions + kappa);
 	lambda -= numDimensions;
 }
 
 //uses Cholesky decomposition ot find a matrix such that for input a the return value l is such that a = l*l^T
-cv::Mat MatrixSqrt(cv::Mat a)
+cv::Mat Matrix_Sqrt(cv::Mat a)
 {
 	int n = a.cols;
 
@@ -290,16 +290,16 @@ void CalcSigmaPoints(cv::Mat controlCommand)
 	sigmaX.col(0) = meanPos;
 	for (int i = 1; i < numDimensions; i++)
 	{
-		sigmaX.col(i) = meanPos + (lambda * MatrixSqrt(sigmaUncertainty));
+		sigmaX.col(i) = meanPos + (lambda * Matrix_Sqrt(sigmaUncertainty));
 	}
 	for (int i = numDimensions; i < doubleDim; i++)
 	{
-		sigmaX.col(i) = meanPos - (lambda * MatrixSqrt(sigmaUncertainty));
+		sigmaX.col(i) = meanPos - (lambda * Matrix_Sqrt(sigmaUncertainty));
 	}
 
 	//next calc sigma points in w(m and c)
 	sigmaWm.at<double>(0, 0) = lambda / (numDimensions + lambda);
-	sigmaWc.at<double>(0, 0) = sigmaWm.at<double>(0, 0) + (1 - (alpha*alpha) + beta);
+	sigmaWc.at<double>(0, 0) = sigmaWm.at<double>(0, 0) + (1 - (kalpha*kalpha) + beta);
 
 	sigmaXBar = g(sigmaX, controlCommand);
 	for (int i = 1; i < doubleDim; i++)
