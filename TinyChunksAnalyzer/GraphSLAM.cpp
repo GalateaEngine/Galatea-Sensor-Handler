@@ -535,7 +535,7 @@ Mat CalcGNPosOptimization(Mat image, KeyFrame keyframe)
 		}
 
 	}
-
+	return cameraPose;
 }
 
 Mat lastPos;
