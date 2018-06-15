@@ -549,6 +549,10 @@ class QuadTreeNode
 public:
 	double avgIntensity;
 	int numChildren;
+	Point position;
+	int length;
+	int width;
+	bool fLeaf;
 	QuadTreeNode *parent;
 	QuadTreeNode *children[4];
 };
@@ -569,59 +573,134 @@ void ComputeQuadtreeDepths(Mat image)
 	std::vector<QuadTreeNode> nodes(treeSize);
 	
 	//place image into quadtree
-	for (int x = 0; x < image.rows; x++)
+	for (int x = 0; x < image.rows; x+=2)
 	{
-		for (int y = 0; y < image.cols; y++)
+		for (int y = 0; y < image.cols; y+=2)
 		{
-			QuadTreeNode leaf;
-			leaf.numChildren = 0;
-			leaf.avgIntensity = image.at<double>(x, y);
-			nodes[index] = leaf;
-			index++;
+			for (int i = 0; i < 2; i++)
+			{
+				for (int j = 0; j < 2; j++)
+				{
+					Point location(x + i , y + j);
+					QuadTreeNode leaf;
+					leaf.numChildren = 0;
+					leaf.avgIntensity = image.at<double>(location);
+					leaf.position = location;
+					leaf.width = 1;
+					leaf.length = 1;
+					leaf.fLeaf = false;
+					nodes[index] = leaf;
+					index++;
+				}
+			}
 		}
 	}
 
 	//construct higher levels of the quad tree
-	int groupSize = treeSize;
+	int groupSizeX = image.rows;
+	int groupSizeY = image.cols;
 	index = treeSize - numPixles;
+	std::vector<QuadTreeNode> finalNodes;
 	for (int l = 0; l < quadTreeDepth - 1; l++)
 	{
-		groupSize /= 4;
-		for (int g = 0; g < groupSize; g++)
+		groupSizeX /= 2;
+		groupSizeY /= 2;
+		int curGroupSize = groupSizeX * groupSizeY;
+		for (int x = 0; x < groupSizeX; x+=2)
 		{
-			QuadTreeNode branch;
-			branch.numChildren = 4;
-			double avgIntensity = 0.0;
-			//set children from the lower group
-			for (int i = 0; i < 4; i++)
+			for (int y = 0; y < groupSizeY; y += 2)
 			{
-				branch.children[i] = &nodes[index + (groupSize * 4) + i];
-				branch.children[i]->parent = &branch;
-				avgIntensity += branch.children[i]->avgIntensity;
-			}
-			branch.avgIntensity /= 4;
-
-			//check if we need to trim branch
-			bool trim = true;
-			for (int i = 0; i < 4; i++)
-			{
-				double percent = branch.avgIntensity / branch.children[i]->avgIntensity;
-				percent *= percent;
-				if (percent > thresholdSquared)
+				for (int i = 0; i < 2; i++)
 				{
-					trim = false;
-					break;
+					for (int j = 0; j < 2; j++)
+					{
+						QuadTreeNode branch;
+						branch.numChildren = 4;
+						double avgIntensity = 0.0;
+						bool fleafSkip = false; //check if we can skip rollup for 
+						//set children from the lower group
+						for (int k = 0; k < 4; k++)
+						{
+							//index is the start of the lower layer
+							//xyOffset is the offset from our x and y values, every X must skip double group size of y, and y is also doubled
+							//this is to account fort he lower level being twice the size of the current
+							//the i and j offsets are to vary our insertion order, they ca be directly applied to x and y
+							int xyOffset = 2 * ((x + i) * groupSizeY + (y + j));
+							//our sub offset k must read the first 4 values in order, the branches are ordered in the proper format on insertion
+							branch.children[i] = &nodes[index + xyOffset + k];
+							branch.children[i]->parent = &branch;
+							avgIntensity += branch.children[i]->avgIntensity;
+							//if any of the children are final leaves, we cannot roll up any further
+							if (branch.children[i]->fLeaf)
+							{
+								fleafSkip = true;
+								break;
+							}
+						}
+						branch.avgIntensity /= 4;
+
+						if (fleafSkip)
+						{
+							//since we are skipping, add all non-fleaf children to the final vector and set this node's fleaf value to true
+							for (int k = 0; k < 4; k++)
+							{
+								if (!branch.children[i]->fLeaf)
+								{
+									branch.children[i]->fLeaf = true;
+									finalNodes.push_back(*branch.children[i]);
+								}
+							}
+						}
+						else
+						{
+							//set branch position and structure info
+							branch.position = branch.children[0]->position;
+							branch.length = branch.children[0]->length * 2;
+							branch.width = branch.children[0]->width * 2;
+
+							//do the threshold check for trim otherwise
+							//check if we need to trim branch
+							bool trim = true;
+							for (int i = 0; i < 4; i++)
+							{
+								double percent = branch.avgIntensity / branch.children[i]->avgIntensity;
+								percent *= percent;
+								if (percent > thresholdSquared)
+								{
+									trim = false;
+									break;
+								}
+							}
+
+							//trim if nesseccary
+							if (trim)
+							{
+								branch.numChildren = 0;
+							}
+							else
+							{
+								//check if final leaf, and add to final vector if true
+								//a branch is a final leaf if it is the first branch from the end not to be trimmed
+								//wait, to get here we must have not encountered any fleaf children (see above) so we don;t need a check lol
+								branch.fLeaf = true;
+								finalNodes.push_back(branch);
+							}
+
+						}
+						
+						//store branch in proper group pattern (11,12,21,22)
+						//2 in a row, skip y size, do 2
+						nodes[(index - curGroupSize) + ((x + i) * groupSizeY) + (y + j)] = branch;
+					}
 				}
+				
 			}
-
-			//trim if nesseccary
-			if (trim) branch.numChildren = 0;
-
-			//store branch
-			nodes[(index - groupSize) + g] = branch;
 		}
-		index -= groupSize;
+		index -= curGroupSize;
 	}
+
+	//now the finalNodes vector contains all our leaves that we are using in the depth map
+
 }
 
 Mat lastPos;
