@@ -1,21 +1,27 @@
 #include "stdafx.h"
 
+//prototypes
+Mat makeHomo(Mat input);
+Mat piInv(Mat input, double invDepth);
+Mat pi(Mat input);
+double calcPhotometricResidual(Point pixleU, Point projectedPoint, KeyFrame keyframe, Mat image, double rmean);
+double HuberNorm(double x, double epsilon);
+Mat projectWorldPointToCameraPointU(Mat cameraParamsK, Mat cameraPoseT, Mat wPointP);
+Mat cameraParams;
+Mat cameraParamsInv;
+class QuadTreeNode;
+
 class KeyFrame
 {
 public:
 	Mat inverseDepthD;
 	Mat scaledImageI;//mean 1
 	Mat inverseDepthVarianceV;
-	Mat cameraTransformationAndScaleS; //taken and scaled with repsect to the world frame W aka the first frame. This is an element of Sim(3)
+	SE3 cameraTransformationAndScaleS; //taken and scaled with repsect to the world frame W aka the first frame. This is an element of Sim(3)
+	std::vector<QuadTreeNode> quadTreeLeaves; //contains the significant quad tree nodes
+	Mat paramsTimesPose;
+	Mat paramsTimesPoseInv;
 };
-
-//prototypes
-Mat makeHomo(Mat input);
-Mat piInv(Mat input, double invDepth);
-Mat pi(Mat input);
-double calcPhotometricResidual(Point pixleU, Point projectedPoint,KeyFrame keyframe, Mat image, double rmean);
-double HuberNorm(double x, double epsilon);
-Mat projectWorldPointToCameraPointU(Mat cameraParamsK, Mat cameraPoseT, Mat wPointP);
 
 //for holding processed pixels that appear in both the keyframe and the current frame
 class pPixel
@@ -30,6 +36,85 @@ public:
 	double imageIntensity;
 	//16 is for the number of numbers in a sim(3) var
 	double derivatives[16];
+};
+
+//look up "lie groups" for more information
+//contains both the translation and rotation for a given object in 3d space
+//methods can export the lie matrix, its individual components, or it's applied 3x3 extrinsic matrix
+class SE3
+{
+private:
+	Mat rotation;
+	Mat translation;
+	Mat lieMat;
+public:
+
+	SE3(Mat _rotation, Mat _translation)
+	{
+		rotation = _rotation;
+		translation = _translation;
+
+		Mat lieMat = Mat(4, 4, CV_64FC1);
+		//set rotation
+		for (int x = 0; x < 3; x++)
+			for (int y = 0; y < 3; y++)
+				lieMat.at<double>(x, y) = rotation.at<double>(x, y);
+		//set translation
+		for (int i = 0; i < 3; i++)
+			lieMat.at<double>(3, i) = translation.at<double>(0, i);
+
+		lieMat.at<double>(3, 3) = 1;
+	}
+
+	void addRotation(Mat rotationAdd)
+	{
+		for (int x = 0; x < 3; x++)
+			for (int y = 0; y < 3; y++)
+			{
+				lieMat.at<double>(x, y) += rotationAdd.at<double>(x, y);
+				rotation.at<double>(x, y) += rotationAdd.at<double>(x, y);
+			}
+	}
+
+	void addTranslation(Mat translationAdd)
+	{
+		for (int i = 0; i < 3; i++)
+		{
+			lieMat.at<double>(3, i) = translationAdd.at<double>(0, i);
+		}
+	}
+
+	void addLie(Mat lieAdd)
+	{
+		for (int x = 0; x < 3; x++)
+			for (int y = 0; y < 4; y++)
+			{
+				lieMat.at<double>(x, y) += lieAdd.at<double>(x, y);
+				rotation.at<double>(x, y) += lieAdd.at<double>(x, y);
+			}
+	}
+
+	Mat getRotation()
+	{
+		return rotation;
+	}
+
+	Mat getTranslation()
+	{
+		return translation;
+	}
+
+	//constructs and returns the lie matrix
+	Mat getLieMatrix()
+	{
+		return lieMat;
+	}
+
+	//calculatres the 3x3 extrinsic matrix
+	Mat getExtrinsicMatrix()
+	{
+		return rotation * translation;
+	}
 };
 
 double pixelIntensityNoise = 1.0;
@@ -181,7 +266,7 @@ double derivative(Mat cameraPose, Point pixelU, Point projectedPoint, KeyFrame k
 	return (y1 - y2) / (2 * alpha);
 }
 
-std::vector<pPixel> ComputeJacobian(Mat cameraParams, Mat cameraPose, KeyFrame keyframe, Mat image, double rmean, int numRes)//b is our guessed position, x is our pixel info, y is residual
+std::vector<pPixel> ComputeJacobian(Mat cameraParams, SE3 cameraPose, KeyFrame keyframe, Mat image, double rmean, int numRes)//b is our guessed position, x is our pixel info, y is residual
 {
 	std::vector<pPixel> jacobianResults;
 
@@ -194,7 +279,7 @@ std::vector<pPixel> ComputeJacobian(Mat cameraParams, Mat cameraPose, KeyFrame k
 			Point pixelU = Point(x, y);
 			double keyDepthAtU = keyframe.inverseDepthD.at<double>(pixelU);
 			//project into world space
-			Mat p = keyframe.cameraTransformationAndScaleS.t() * piInv(makeHomo(Mat(pixelU)), keyDepthAtU);
+			Mat p = keyframe.cameraTransformationAndScaleS.getExtrinsicMatrix().t() * piInv(makeHomo(Mat(pixelU)), keyDepthAtU);
 			//project into new image
 			Point projectedPoint = Point(projectWorldPointToCameraPointU(cameraParams, cameraPose, p));
 			//do a bounds check, continue if we are out of range
@@ -208,13 +293,13 @@ std::vector<pPixel> ComputeJacobian(Mat cameraParams, Mat cameraPose, KeyFrame k
 			npixel.keyframeIntensity = keyframe.scaledImageI.at<double>(pixelU);
 			jacobianResults.push_back(pPixel());
 			//for the sim(3) vars
-			for (int i = 0; i < cameraPose.rows; i++)
+			for (int i = 0; i < cameraPose.getLieMatrix().rows; i++)
 			{
-				for (int j = 0; j < cameraPose.cols; j++)
+				for (int j = 0; j < cameraPose.getLieMatrix.cols; j++)
 				{
 					//compute this section of the jacobian and store for jacobian compilation
 					//jc.at<double>((x * image.rows) + y, (i * b.rows) + j) = derivative(cameraParams, b, pixelU, projectedPoint, keyframe, image, rmean, i, j);
-					jacobianResults.back().derivatives[(i * cameraPose.cols) + j] = derivative(cameraPose, pixelU, projectedPoint, keyframe, image, rmean, i, j);
+					jacobianResults.back().derivatives[(i * cameraPose.getLieMatrix.cols) + j] = derivative(cameraPose.getLieMatrix(), pixelU, projectedPoint, keyframe, image, rmean, i, j);
 				}
 			}
 		}
@@ -222,7 +307,7 @@ std::vector<pPixel> ComputeJacobian(Mat cameraParams, Mat cameraPose, KeyFrame k
 	return jacobianResults;
 }
 
-std::vector<pPixel> ComputeResiduals(Mat cameraParams, Mat cameraPose, KeyFrame keyframe, Mat image, double rmean)//b is our guessed position, x is our pixel info, y is residual
+std::vector<pPixel> ComputeResiduals(Mat cameraParams, SE3 cameraPose, KeyFrame keyframe, Mat image, double rmean)//b is our guessed position, x is our pixel info, y is residual
 {
 	std::vector<pPixel> results;
 
@@ -235,7 +320,7 @@ std::vector<pPixel> ComputeResiduals(Mat cameraParams, Mat cameraPose, KeyFrame 
 			Point pixelU = Point(x, y);
 			double keyDepthAtU = keyframe.inverseDepthD.at<double>(pixelU);
 			//project into world space
-			Mat p = keyframe.cameraTransformationAndScaleS.t() * piInv(makeHomo(Mat(pixelU)), keyDepthAtU);
+			Mat p = keyframe.cameraTransformationAndScaleS.getExtrinsicMatrix().t() * piInv(makeHomo(Mat(pixelU)), keyDepthAtU);
 			//project into new image
 			Point projectedPoint = Point(projectWorldPointToCameraPointU(cameraParams, cameraPose, p));
 			//do a bounds check, continue if we are out of range
@@ -348,12 +433,12 @@ Mat piInv(Mat input, double invDepth)
 }
 
 //puts the projected point from pi into camera space
-Mat projectWorldPointToCameraPointU(Mat cameraParamsK, Mat cameraPoseT, Mat wPointP)
+Mat projectWorldPointToCameraPointU(Mat cameraParamsK, SE3 cameraPoseT, Mat wPointP)
 {
 	Mat pBar = makeHomo(wPointP);
 	//3x3 * 4x4 * 3x1 ???????? How can you dehomogenize an SE3 element?
 	//DUH 3x3 * dehomo(4x4 * 4x1) = 3x3 * 3x1 = 3x1
-	Mat notationalClarity = deHomo(cameraPoseT * pBar);
+	Mat notationalClarity = deHomo(cameraPoseT.getLieMatrix() * pBar);
 	return pi(cameraParamsK * notationalClarity);
 }
 
@@ -385,7 +470,7 @@ double calcPhotometricResidual(Point pixelU, Point projectedPoint, KeyFrame keyf
 	return r;
 }
 
-void ComputeMedianResidualAndCorrectedPhotometricResiduals(Mat cameraParams, Mat cameraPose, Mat image, KeyFrame kf, std::vector<pPixel> & results, double & median)
+void ComputeMedianResidualAndCorrectedPhotometricResiduals(Mat cameraParams, SE3 cameraPose, Mat image, KeyFrame kf, std::vector<pPixel> & results, double & median)
 {
 	// max heap to store the higher half elements 
 	std::priority_queue<double> max_heap_left;
@@ -401,7 +486,7 @@ void ComputeMedianResidualAndCorrectedPhotometricResiduals(Mat cameraParams, Mat
 			Point pixelU = Point(i, j);
 			double keyDepthAtU = kf.inverseDepthD.at<double>(pixelU);
 			//project into world space
-			Mat p = kf.cameraTransformationAndScaleS.t() * piInv(makeHomo(Mat(pixelU)), keyDepthAtU);
+			Mat p = kf.cameraTransformationAndScaleS.getExtrinsicMatrix().t() * piInv(makeHomo(Mat(pixelU)), keyDepthAtU);
 			//project into new image
 			Point projectedPoint = Point(projectWorldPointToCameraPointU(cameraParams, cameraPose, p));
 			//do a bounds check, continue if we are out of range
@@ -477,10 +562,11 @@ Mat TransformJacobian(Mat jacobian, Mat residuals)
 
 
 Mat cameraParams;
-Mat CalcGNPosOptimization(Mat image, KeyFrame keyframe)
+Mat cameraParamsInv;
+SE3 CalcGNPosOptimization(Mat image, KeyFrame keyframe)
 {
 	//set initial camera pose
-	Mat cameraPose = keyframe.cameraTransformationAndScaleS;
+	SE3 cameraPose = keyframe.cameraTransformationAndScaleS;
 
 	//run gauss-newton optimization
 	double residualSum = 0.0;
@@ -518,16 +604,18 @@ Mat CalcGNPosOptimization(Mat image, KeyFrame keyframe)
 
 
 		//store position
-		Mat camOld = cameraPose;
+		SE3 camOld = cameraPose;
+		Mat deltaMat(4, 4, CV_64FC1);
 		//increment camera pose
 		//for the sim(3) vars
-		for (int i = 0; i < cameraPose.rows; i++)
+		for (int i = 0; i < 4; i++)
 		{
-			for (int j = 0; j < cameraPose.cols; j++)
+			for (int j = 0; j < 4; j++)
 			{
-				cameraPose.at<double>(i,j) += deltaX.at<double>((i * cameraPose.cols) + j) * lambda;
+				deltaMat.at<double>(i, j) += deltaX.at<double>((i * 4) + j) * lambda;
 			}
 		}
+		cameraPose.addLie(deltaMat);
 		//compute new residuals
 		std::vector<pPixel> nresiduals = ComputeResiduals(cameraParams, cameraPose, keyframe, image, rmean);
 		if (error < CalcErrorVal(nresiduals))
@@ -548,6 +636,8 @@ class QuadTreeNode
 {
 public:
 	double avgIntensity;
+	double xGradient;
+	double yGradient;
 	int numChildren;
 	Point position;
 	int length;
@@ -559,8 +649,9 @@ public:
 
 int quadTreeDepth = 4;
 double thresholdSquared = 0.01;//10% post square
-void ComputeQuadtreeDepths(Mat image)
+void ComputeQuadtreeForKeyframe(KeyFrame &kf)
 {
+	Mat image = kf.scaledImageI;
 	int numPixles = image.rows * image.cols;
 	int treeSize = numPixles;
 	int tpixels = numPixles;
@@ -571,20 +662,39 @@ void ComputeQuadtreeDepths(Mat image)
 	}
 	int index = treeSize - numPixles;
 	std::vector<QuadTreeNode> nodes(treeSize);
-	
+
 	//place image into quadtree
-	for (int x = 0; x < image.rows; x+=2)
+	for (int x = 0; x < image.rows; x += 2)
 	{
-		for (int y = 0; y < image.cols; y+=2)
+		for (int y = 0; y < image.cols; y += 2)
 		{
 			for (int i = 0; i < 2; i++)
 			{
 				for (int j = 0; j < 2; j++)
 				{
-					Point location(x + i , y + j);
+					Point location(x + i, y + j);
 					QuadTreeNode leaf;
 					leaf.numChildren = 0;
 					leaf.avgIntensity = image.at<double>(location);
+
+					//calculate and store gradient
+					double x1, x2, y1, y2;
+					//bounds check gradiant, use current value if tripped
+					if (x + i - 1 > 0) x1 = image.at<double>(x + i - 1, y + j);
+					else x1 = leaf.avgIntensity;
+
+					if (x + i + 1 < image.rows) x2 = image.at<double>(x + i + 1, y + j);
+					else x2 = leaf.avgIntensity;
+
+					if (y + j - 1 > 0) y1 = image.at<double>(x + i, y + j - 1);
+					else y1 = leaf.avgIntensity;
+
+					if (y + j + 1 < image.cols) y2 = image.at<double>(x + i, y + j + 1);
+					else y2 = leaf.avgIntensity;
+
+					leaf.xGradient = x1 - x2;
+					leaf.yGradient = y1 - y2;
+
 					leaf.position = location;
 					leaf.width = 1;
 					leaf.length = 1;
@@ -606,7 +716,7 @@ void ComputeQuadtreeDepths(Mat image)
 		groupSizeX /= 2;
 		groupSizeY /= 2;
 		int curGroupSize = groupSizeX * groupSizeY;
-		for (int x = 0; x < groupSizeX; x+=2)
+		for (int x = 0; x < groupSizeX; x += 2)
 		{
 			for (int y = 0; y < groupSizeY; y += 2)
 			{
@@ -617,6 +727,8 @@ void ComputeQuadtreeDepths(Mat image)
 						QuadTreeNode branch;
 						branch.numChildren = 4;
 						double avgIntensity = 0.0;
+						double xGradient;
+						double yGradient;
 						bool fleafSkip = false; //check if we can skip rollup for 
 						//set children from the lower group
 						for (int k = 0; k < 4; k++)
@@ -630,14 +742,20 @@ void ComputeQuadtreeDepths(Mat image)
 							branch.children[i] = &nodes[index + xyOffset + k];
 							branch.children[i]->parent = &branch;
 							avgIntensity += branch.children[i]->avgIntensity;
+							xGradient += branch.children[i]->xGradient;
+							yGradient += branch.children[i]->yGradient;
 							//if any of the children are final leaves, we cannot roll up any further
 							if (branch.children[i]->fLeaf)
 							{
 								fleafSkip = true;
-								break;
 							}
+
 						}
 						branch.avgIntensity /= 4;
+						//this is an approximation and WRONG, in fact we should be using max found instead of avg
+						//but this might be close enough, we can check later
+						branch.xGradient /= 4;
+						branch.yGradient /= 4;
 
 						if (fleafSkip)
 						{
@@ -687,19 +805,149 @@ void ComputeQuadtreeDepths(Mat image)
 							}
 
 						}
-						
+
 						//store branch in proper group pattern (11,12,21,22)
 						//2 in a row, skip y size, do 2
 						nodes[(index - curGroupSize) + ((x + i) * groupSizeY) + (y + j)] = branch;
 					}
 				}
-				
+
 			}
 		}
 		index -= curGroupSize;
 	}
 
-	//now the finalNodes vector contains all our leaves that we are using in the depth map
+	//now the finalNodes vector contains all our leaves that we are using in the keyframe
+	kf.quadTreeLeaves = finalNodes;
+
+}
+
+//calculates the depths by comparing the image, after plcement into a power of 2 tree, against the keyframe quadtree
+void computeDepthsFromStereoPair(KeyFrame kf, Mat image, Mat cameraParams, SE3 cameraPos)
+{
+	int numPixles = image.rows * image.cols;
+	int treeSize = numPixles;
+	int tpixels = numPixles;
+	for (int i = 0; i < quadTreeDepth; i++)
+	{
+		tpixels /= 4;
+		treeSize += tpixels;
+	}
+	int index = treeSize - numPixles;
+	std::vector<QuadTreeNode> nodes(treeSize);
+
+	//place image into quadtree
+	for (int x = 0; x < image.rows; x += 2)
+	{
+		for (int y = 0; y < image.cols; y += 2)
+		{
+			for (int i = 0; i < 2; i++)
+			{
+				for (int j = 0; j < 2; j++)
+				{
+					Point location(x + i, y + j);
+					QuadTreeNode leaf;
+					leaf.numChildren = 0;
+					leaf.avgIntensity = image.at<double>(location);
+					leaf.position = location;
+					leaf.width = 1;
+					leaf.length = 1;
+					leaf.fLeaf = false;
+					nodes[index] = leaf;
+					index++;
+				}
+			}
+		}
+	}
+
+	//construct higher levels of the quad tree
+	int groupSizeX = image.rows;
+	int groupSizeY = image.cols;
+	index = treeSize - numPixles;
+	std::vector<QuadTreeNode> finalNodes;
+	for (int l = 0; l < quadTreeDepth - 1; l++)
+	{
+		groupSizeX /= 2;
+		groupSizeY /= 2;
+		int curGroupSize = groupSizeX * groupSizeY;
+		for (int x = 0; x < groupSizeX; x += 2)
+		{
+			for (int y = 0; y < groupSizeY; y += 2)
+			{
+				for (int i = 0; i < 2; i++)
+				{
+					for (int j = 0; j < 2; j++)
+					{
+						QuadTreeNode branch;
+						branch.numChildren = 4;
+						double avgIntensity = 0.0;
+						for (int k = 0; k < 4; k++)
+						{
+							//index is the start of the lower layer
+							//xyOffset is the offset from our x and y values, every X must skip double group size of y, and y is also doubled
+							//this is to account fort he lower level being twice the size of the current
+							//the i and j offsets are to vary our insertion order, they ca be directly applied to x and y
+							int xyOffset = 2 * ((x + i) * groupSizeY + (y + j));
+							//our sub offset k must read the first 4 values in order, the branches are ordered in the proper format on insertion
+							branch.children[i] = &nodes[index + xyOffset + k];
+							branch.children[i]->parent = &branch;
+							avgIntensity += branch.children[i]->avgIntensity;
+						}
+						branch.avgIntensity /= 4;
+
+						//set branch position and structure info
+						branch.position = branch.children[0]->position;
+						branch.length = branch.children[0]->length * 2;
+						branch.width = branch.children[0]->width * 2;
+
+
+						//store branch in proper group pattern (11,12,21,22)
+						//2 in a row, skip y size, do 2
+						nodes[(index - curGroupSize) + ((x + i) * groupSizeY) + (y + j)] = branch;
+					}
+				}
+
+			}
+		}
+		index -= curGroupSize;
+	}
+
+	//for each fleaf in the keyframe we search for a match
+
+	//first generate the fundamental matrix
+	//get offset from keyframe to image
+	Mat transform = kf.cameraTransformationAndScaleS.getLieMatrix() - cameraPos.getLieMatrix();
+
+	//extract s = promote translate from vector to mat in cross multiply format
+	Mat S(3, 3, CV_64FC1);
+
+	S.at<double>(0, 0) = 0;
+	S.at<double>(1, 0) = transform.at<double>(2, 3);
+	S.at<double>(2, 0) = -transform.at<double>(1, 3);
+
+	S.at<double>(0, 1) = -transform.at<double>(2, 3);
+	S.at<double>(1, 1) = 0;
+	S.at<double>(2, 1) = transform.at<double>(0, 3);
+
+	S.at<double>(0, 2) = transform.at<double>(1, 3);
+	S.at<double>(1, 2) = -transform.at<double>(0, 3);
+	S.at<double>(2, 2) = 0;
+
+	//extract R
+	Mat R(3, 3, CV_64FC1);
+	for (int x = 0; x < 3; x++)
+		for (int y = 0; y < 3; y++)
+			R.at<double>(x, y) = transform.at<double>(x, y);
+
+	//calculate Mi inverse
+	//3x3 * 3x3 = 3x3
+	Mat imageParamsTimesPoseInv = (cameraParams * cameraPos.getExtrinsicMatrix).inv();
+
+	//Construct F = Mk^(-T)EMi^(-1), E = RS
+	//3x3 * (3x3 * 3x3) * 3x3
+	Mat F = kf.paramsTimesPoseInv.t() * (R * S) * cameraParamsInv;
+
+	
 
 }
 
@@ -712,10 +960,10 @@ KeyFrame lastKey;
 //enhanced implementation of https://groups.csail.mit.edu/rrg/papers/greene_icra16.pdf
 //K: is a 3x3 real mat with the camera parameters
 //pi: perspective projection function
-Mat LS_Graph_SLAM(Mat cameraFrame)
+SE3 LS_Graph_SLAM(Mat cameraFrame)
 {
 
-	Mat position = CalcGNPosOptimization(cameraFrame, lastKey);
+	SE3 position = CalcGNPosOptimization(cameraFrame, lastKey);
 
 	//construct depth quadtrees
 
