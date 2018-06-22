@@ -643,6 +643,7 @@ public:
 	int length;
 	int width;
 	bool fLeaf;
+	int layer;
 	QuadTreeNode *parent;
 	QuadTreeNode *children[4];
 };
@@ -695,6 +696,7 @@ void ComputeQuadtreeForKeyframe(KeyFrame &kf)
 					leaf.xGradient = x1 - x2;
 					leaf.yGradient = y1 - y2;
 
+					leaf.layer = 0;
 					leaf.position = location;
 					leaf.width = 1;
 					leaf.length = 1;
@@ -752,6 +754,7 @@ void ComputeQuadtreeForKeyframe(KeyFrame &kf)
 
 						}
 						branch.avgIntensity /= 4;
+						branch.layer = l + 1;
 						//this is an approximation and WRONG, in fact we should be using max found instead of avg
 						//but this might be close enough, we can check later
 						branch.xGradient /= 4;
@@ -822,97 +825,36 @@ void ComputeQuadtreeForKeyframe(KeyFrame &kf)
 
 }
 
-//calculates the depths by comparing the image, after plcement into a power of 2 tree, against the keyframe quadtree
+//calculates the depths by comparing the image, after plcement into a power of 2 pyramid, against the keyframe quadtree leaves
 void computeDepthsFromStereoPair(KeyFrame kf, Mat image, Mat cameraParams, SE3 cameraPos)
 {
-	int numPixles = image.rows * image.cols;
-	int treeSize = numPixles;
-	int tpixels = numPixles;
+	int prows = image.rows;
+	int pcols = image.cols;
+	std::vector<Mat> pyramid;
+	Mat lastImage = image;
+
+	//create power pyramid
 	for (int i = 0; i < quadTreeDepth; i++)
 	{
-		tpixels /= 4;
-		treeSize += tpixels;
-	}
-	int index = treeSize - numPixles;
-	std::vector<QuadTreeNode> nodes(treeSize);
-
-	//place image into quadtree
-	for (int x = 0; x < image.rows; x += 2)
-	{
-		for (int y = 0; y < image.cols; y += 2)
+		Mat pimage(prows / 2, pcols / 2, CV_64FC1);
+		for (int x = 0; x < prows; x += 2)
 		{
-			for (int i = 0; i < 2; i++)
+			for (int y = 0; y < pcols; y += 2)
 			{
+				double avg = 0;
 				for (int j = 0; j < 2; j++)
 				{
-					Point location(x + i, y + j);
-					QuadTreeNode leaf;
-					leaf.numChildren = 0;
-					leaf.avgIntensity = image.at<double>(location);
-					leaf.position = location;
-					leaf.width = 1;
-					leaf.length = 1;
-					leaf.fLeaf = false;
-					nodes[index] = leaf;
-					index++;
-				}
-			}
-		}
-	}
-
-	//construct higher levels of the quad tree
-	int groupSizeX = image.rows;
-	int groupSizeY = image.cols;
-	index = treeSize - numPixles;
-	std::vector<QuadTreeNode> finalNodes;
-	for (int l = 0; l < quadTreeDepth - 1; l++)
-	{
-		groupSizeX /= 2;
-		groupSizeY /= 2;
-		int curGroupSize = groupSizeX * groupSizeY;
-		for (int x = 0; x < groupSizeX; x += 2)
-		{
-			for (int y = 0; y < groupSizeY; y += 2)
-			{
-				for (int i = 0; i < 2; i++)
-				{
-					for (int j = 0; j < 2; j++)
+					for (int k = 0; k < 2; k++)
 					{
-						QuadTreeNode branch;
-						branch.numChildren = 4;
-						double avgIntensity = 0.0;
-						for (int k = 0; k < 4; k++)
-						{
-							//index is the start of the lower layer
-							//xyOffset is the offset from our x and y values, every X must skip double group size of y, and y is also doubled
-							//this is to account fort he lower level being twice the size of the current
-							//the i and j offsets are to vary our insertion order, they ca be directly applied to x and y
-							int xyOffset = 2 * ((x + i) * groupSizeY + (y + j));
-							//our sub offset k must read the first 4 values in order, the branches are ordered in the proper format on insertion
-							branch.children[i] = &nodes[index + xyOffset + k];
-							branch.children[i]->parent = &branch;
-							avgIntensity += branch.children[i]->avgIntensity;
-						}
-						branch.avgIntensity /= 4;
-
-						//set branch position and structure info
-						branch.position = branch.children[0]->position;
-						branch.length = branch.children[0]->length * 2;
-						branch.width = branch.children[0]->width * 2;
-
-
-						//store branch in proper group pattern (11,12,21,22)
-						//2 in a row, skip y size, do 2
-						nodes[(index - curGroupSize) + ((x + i) * groupSizeY) + (y + j)] = branch;
+						avg += lastImage.at<double>(x + j, k + k);
 					}
 				}
-
+				pimage.at<double>(x, y) += avg/4.0;
 			}
 		}
-		index -= curGroupSize;
+		lastImage = pimage;
+		pyramid.push_back(pimage);
 	}
-
-	//for each fleaf in the keyframe we search for a match
 
 	//first generate the fundamental matrix
 	//get offset from keyframe to image
@@ -941,14 +883,92 @@ void computeDepthsFromStereoPair(KeyFrame kf, Mat image, Mat cameraParams, SE3 c
 
 	//calculate Mi inverse
 	//3x3 * 3x3 = 3x3
-	Mat imageParamsTimesPoseInv = (cameraParams * cameraPos.getExtrinsicMatrix).inv();
+	Mat imageParamsTimesPose = cameraParams * cameraPos.getExtrinsicMatrix();
+	Mat imageParamsTimesPoseInv = imageParamsTimesPose.inv();
 
 	//Construct F = Mk^(-T)EMi^(-1), E = RS
 	//3x3 * (3x3 * 3x3) * 3x3
 	Mat F = kf.paramsTimesPoseInv.t() * (R * S) * cameraParamsInv;
 
-	
+	//for each fleaf in the keyframe we search for a match
+	for (int i = 0; i < kf.quadTreeLeaves.size; i++)
+	{
+		//extract the leaf
+		QuadTreeNode leaf = kf.quadTreeLeaves[i];
 
+		//store the value we will be comparing against
+		double kValue = leaf.avgIntensity;
+
+		//extract the image pyramid layer we will be comparing against
+		Mat pimage = pyramid[leaf.layer];
+
+		//find epipolar x coordinate so we know where to start
+		//3x3 * 3x1
+		Mat e = deHomo(imageParamsTimesPose * kf.cameraTransformationAndScaleS.getTranslation().t());
+		int x = floor(e.at<double>(0,0));
+
+		//calculate line equation
+		Mat position(1, 3, CV_64FC1);
+		position.at<double>(0, 0) = leaf.position.x;
+		position.at<double>(0, 1) = leaf.position.y;
+		position.at<double>(0, 2) = 1;
+		Mat lineParams = F * position;
+
+		//store contant values for epipolar line
+		double xC = lineParams.at<double>(0, 0);
+		double yC = lineParams.at<double>(0, 1);
+		double C = lineParams.at<double>(0, 2);
+
+		//values for storing our max and pixel position
+		Point bestPos;
+		double minSSD = std::numeric_limits<double>::infinity();
+		
+		//5 sample window and value for updating ssd
+		std::queue<double> window;
+		double curSSD = 0;
+
+		//for the entire epipolar line try and find our best match
+		for (; x < pimage.rows; x++)
+		{
+			//calculate y
+			int y = round(((-x * xC) - C) / yC);
+			if (y < 0 || y > pimage.cols)
+			{
+				//aside from MAYBE odd rounding errors this should NEVER happen if we are calculating the epipolar line right
+				throw;
+			}
+
+			//calc ssd
+			double iValue = pimage.at<double>(x, y);
+			double diff = iValue - kValue;
+			double ssd = diff * diff;
+
+			//make sure we start with the window initially full
+			while (window.size() < 5)
+			{
+				window.push(diff);
+			}
+
+			//store the ssd
+			window.push(ssd);
+			//add the new value to the counter
+			curSSD += ssd;
+			//remove the old ssd value
+			curSSD -= window.front();
+
+			//update our min if we need too
+			if (curSSD < minSSD)
+			{
+				bestPos = Point(x, y);
+				minSSD = curSSD;
+			}
+		}
+
+		//we now have our best ssd value and the most likley location
+		//thus we can kalman update our depth map and variances,
+		//or if the ssd value is too large put a strike against the current leaf
+		//Finally, if a leaf has to many strikes we rule it invalid
+	}
 }
 
 Mat lastPos;
