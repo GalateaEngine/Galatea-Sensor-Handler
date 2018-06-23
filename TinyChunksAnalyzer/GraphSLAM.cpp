@@ -638,11 +638,15 @@ public:
 	double avgIntensity;
 	double xGradient;
 	double yGradient;
+	double depth;
+	double depthVariance;
 	int numChildren;
 	Point position;
 	int length;
 	int width;
 	bool fLeaf;
+	bool valid;
+	int strikes;
 	int layer;
 	QuadTreeNode *parent;
 	QuadTreeNode *children[4];
@@ -676,6 +680,7 @@ void ComputeQuadtreeForKeyframe(KeyFrame &kf)
 					Point location(x + i, y + j);
 					QuadTreeNode leaf;
 					leaf.numChildren = 0;
+					leaf.strikes = 0;
 					leaf.avgIntensity = image.at<double>(location);
 
 					//calculate and store gradient
@@ -755,6 +760,7 @@ void ComputeQuadtreeForKeyframe(KeyFrame &kf)
 						}
 						branch.avgIntensity /= 4;
 						branch.layer = l + 1;
+						branch.strikes = 0;
 						//this is an approximation and WRONG, in fact we should be using max found instead of avg
 						//but this might be close enough, we can check later
 						branch.xGradient /= 4;
@@ -768,6 +774,7 @@ void ComputeQuadtreeForKeyframe(KeyFrame &kf)
 								if (!branch.children[i]->fLeaf)
 								{
 									branch.children[i]->fLeaf = true;
+									branch.children[i]->valid = true;
 									finalNodes.push_back(*branch.children[i]);
 								}
 							}
@@ -804,6 +811,7 @@ void ComputeQuadtreeForKeyframe(KeyFrame &kf)
 								//a branch is a final leaf if it is the first branch from the end not to be trimmed
 								//wait, to get here we must have not encountered any fleaf children (see above) so we don;t need a check lol
 								branch.fLeaf = true;
+								branch.valid = true;
 								finalNodes.push_back(branch);
 							}
 
@@ -893,8 +901,12 @@ void computeDepthsFromStereoPair(KeyFrame kf, Mat image, Mat cameraParams, SE3 c
 	//for each fleaf in the keyframe we search for a match
 	for (int i = 0; i < kf.quadTreeLeaves.size; i++)
 	{
+
 		//extract the leaf
 		QuadTreeNode leaf = kf.quadTreeLeaves[i];
+
+		//skip if the node is invalid
+		if (leaf.valid) continue;
 
 		//store the value we will be comparing against
 		double kValue = leaf.avgIntensity;
@@ -967,7 +979,60 @@ void computeDepthsFromStereoPair(KeyFrame kf, Mat image, Mat cameraParams, SE3 c
 		//we now have our best ssd value and the most likley location
 		//thus we can kalman update our depth map and variances,
 		//or if the ssd value is too large put a strike against the current leaf
-		//Finally, if a leaf has to many strikes we rule it invalid
+		//Finally, if a leaf has too many strikes we rule it invalid
+		if (minSSD < 50) //arbitrary threshold, currently
+		{
+			//triangulate depth
+			//calc baseline = dist between cameras
+			Mat baseOffset = cameraPos.getTranslation() - kf.cameraTransformationAndScaleS.getTranslation();
+			double sum = 0;
+			for (int l = 0; l < 3; l++)
+			{
+				sum += baseOffset.at<double>(0, l) * baseOffset.at<double>(0, l);
+			}
+			double baseline = sqrt(sum);
+
+			//calculate pixel diff
+			//this is the vector created from the camera centers towards the pixels selected, subtracted from one another
+			double pDiff = bestPos.x - leaf.position.x;
+
+			double focalLength = cameraParams.at<double>(0, 0);
+
+			//see baseline disparity depth calculation
+			//we may need to recitfy our image sections, but the paper says the difference is small enough not to matter
+			double depth = (baseline * focalLength) / pDiff;
+
+			//if depth is uninitialized just set it
+			if (kf.quadTreeLeaves[i].depth == 0 && kf.quadTreeLeaves[i].depthVariance == 0)
+			{
+				kf.quadTreeLeaves[i].depth = depth;
+				kf.quadTreeLeaves[i].depthVariance = 0.5;//we can attenuate or strengthen sensor dependancy later
+			}
+			else
+			{
+				//update depth based on variance, and update variance too
+				double error = kf.quadTreeLeaves[i].depth - depth;
+				//square the error
+				error *= error;
+				//update based on current variance
+				double updateMod = (1 / kf.quadTreeLeaves[i].depthVariance);
+				double keepMod = 1.0 - updateMod;
+				//update depth
+				kf.quadTreeLeaves[i].depth = (kf.quadTreeLeaves[i].depth * keepMod) + (depth * updateMod);
+				//update variance
+				kf.quadTreeLeaves[i].depthVariance = (kf.quadTreeLeaves[i].depthVariance * keepMod) + (error * updateMod);
+				//may need to change this to a more advanced filter later, but we'll try this for now
+			}
+		}
+		else
+		{
+			//mark this node with a strike
+			kf.quadTreeLeaves[i].strikes++;
+			if (kf.quadTreeLeaves[i].strikes > 10)//another arbitrary threshold...
+			{
+				kf.quadTreeLeaves[i].valid = false;
+			}
+		}
 	}
 }
 
