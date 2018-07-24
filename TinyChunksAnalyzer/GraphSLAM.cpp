@@ -1010,6 +1010,8 @@ void computeDepthsFromStereoPair(KeyFrame kf, Mat image, Mat cameraParams, SE3 c
 			}
 			else
 			{
+				//>hurf durf use a kalman filter for a single value
+				//no
 				//update depth based on variance, and update variance too
 				double error = kf.quadTreeLeaves[i].depth - depth;
 				//square the error
@@ -1034,6 +1036,187 @@ void computeDepthsFromStereoPair(KeyFrame kf, Mat image, Mat cameraParams, SE3 c
 			}
 		}
 	}
+}
+
+void projectDepthNodesToDepthMap(KeyFrame kf)
+{
+	std::list<QuadTreeNode*> invalidChunks;
+	std::list<QuadTreeNode*> validChunks;
+	std::list<QuadTreeNode*> retryList;
+	for (int i = 0; i < kf.quadTreeLeaves.size(); i++)
+	{
+		//paper uses interpolation for assignment, lets try skipping it for now, and we can use our own fast poly algo later
+		QuadTreeNode qtn = kf.quadTreeLeaves[i];
+		int x = qtn.position.x;
+		int y = qtn.position.y;
+		int xSize = qtn.position.x + qtn.length;
+		int ySize = qtn.position.y + qtn.width;
+		//only set if valid
+		if (qtn.valid)
+		{
+			for (; x < xSize; x++)
+			{
+				for (; y < ySize; y++)
+				{
+					kf.inverseDepthD.at<double>(x, y) = 1 / qtn.depth;
+					kf.inverseDepthVarianceV.at<double>(x, y) = qtn.depthVariance;
+				}
+			}
+			validChunks.push_back(&qtn);
+		}
+		else
+		{
+			invalidChunks.push_back(&qtn);
+		}
+	}
+
+	//keeping trying to interpolate nodes until all have a value for everything
+	while (invalidChunks.size() > 0)
+	{
+		auto it = std::begin(invalidChunks);
+		while (it != std::end(invalidChunks))
+		{
+			QuadTreeNode *qtn = *it;
+
+			//find surrounding nodes
+			double avgDepth = 0.0;
+			int invalidCount = 0;
+			int invalidLimit = qtn->length * 2;
+			int numValues = qtn->length * 4;
+
+			//west side
+			int tlength = qtn->position.y + qtn->length;
+			Point pt = qtn->position;
+			if (pt.x == 0)
+			{
+				pt.x = 1;
+				pt.y = tlength;
+				numValues -= qtn->length;
+			}
+			else
+			{
+				pt.x -= 1;
+				
+				for (; pt.y < tlength; pt.y++)
+				{
+					double value = kf.inverseDepthD.at<double>(pt);
+					if (value == 0)
+					{
+						invalidCount++;
+						numValues--;
+						continue;
+					}
+					avgDepth += value;
+				}
+				pt.x++;
+			}
+			
+
+			//south side
+			tlength = qtn->position.x + qtn->length;
+			if (pt.y + qtn->length == kf.inverseDepthD.rows)
+			{
+				pt.x = tlength;
+				pt.y = kf.inverseDepthD.rows - 1;
+				numValues -= qtn->length;
+			}
+			else
+			{
+				for (; pt.x < tlength; pt.x++)
+				{
+					double value = kf.inverseDepthD.at<double>(pt);
+					if (value == 0)
+					{
+						invalidCount++;
+						numValues--;
+						continue;
+					}
+					avgDepth += value;
+				}
+
+				if (invalidCount > invalidLimit) { it++;  continue; };
+				pt.y--;
+			}
+			
+
+			//east side
+			tlength = qtn->position.y;
+			if (pt.x + qtn->length == kf.inverseDepthD.rows)
+			{
+				pt.y = tlength;
+				pt.x = qtn->position.x;
+				numValues -= qtn->length;
+			}
+			else
+			{
+				for (; pt.y > tlength; pt.y--)
+				{
+					double value = kf.inverseDepthD.at<double>(pt);
+					if (value == 0)
+					{
+						invalidCount++;
+						numValues--;
+						continue;
+					}
+					avgDepth += value;
+				}
+
+				if (invalidCount > invalidLimit) { it++;  continue; }
+				pt.x--;
+			}
+
+			//north side
+			if (pt.y != 0)
+			{
+				tlength = qtn->position.x;
+				for (; pt.x > tlength; pt.x--)
+				{
+					double value = kf.inverseDepthD.at<double>(pt);
+					if (value == 0)
+					{
+						invalidCount++;
+						numValues--;
+						continue;
+					}
+					avgDepth += value;
+				}
+
+				if (invalidCount > invalidLimit) { it++;  continue; };
+			}
+			else
+			{
+				numValues -= qtn->length;
+			}
+
+
+			//set to interpolated value(gradiant?)
+			qtn->depth = avgDepth / numValues;
+
+			//remove from invalid list and add to retry list and valid list
+			qtn->valid = true;
+			qtn->strikes = 0;
+			retryList.push_back(qtn);
+			it = invalidChunks.erase(it);
+		}
+	}
+
+	//cycle through the retry list and project all the depths back onto the depthmap 
+	for (QuadTreeNode* const& qtn : retryList)
+	{
+		int x = qtn->position.x;
+		int y = qtn->position.y;
+		int xSize = qtn->position.x + qtn->length;
+		int ySize = qtn->position.y + qtn->width;
+		for (; x < xSize; x++)
+		{
+			for (; y < ySize; y++)
+			{
+				kf.inverseDepthD.at<double>(x, y) = 1 / qtn->depth;
+				kf.inverseDepthVarianceV.at<double>(x, y) = qtn->depthVariance;
+			}
+		}
+	}
+
 }
 
 Mat lastPos;
