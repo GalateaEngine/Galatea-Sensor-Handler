@@ -13,6 +13,12 @@ TCA_Video::TCA_Video()
 		ready = false;
 	objects = 0;
 	objectMap.empty();
+	bool useNaiveEdge = false;
+	bool useGraphSLAM = true;
+	if (useGraphSLAM)
+	{
+		gs.Initialize_LS_Graph_SLAM();
+	}
 	cv::namedWindow("VideoFeed1");
 	cv::namedWindow("VideoFeed2");
 	cv::namedWindow("VideoFeed3");
@@ -165,45 +171,51 @@ bool TCA_Video::processFrameData(cv::Mat data)
 
 bool TCA_Video::update()
 {
-	//if (ready)
+	if (ready)
 	{
-		//REMOVE THIS LATER
-		objectMap.clear();
-		objects = 0;
+
 		cv::Mat frame;
-		//cap >> frame;
-		frame = imread("./image1.jpg", CV_LOAD_IMAGE_COLOR);
+		cap >> frame;
 		imshow("VideoFeed1", frame);
 		if (frame.empty())
 		{
 			ready = false;
 			return false;
 		}
-		cv::Mat edge;
-		Mat waste;
-		cv::cvtColor(frame, edge, CV_BGR2GRAY);
-		double otsu_thresh_val = cv::threshold(edge, waste, 0, 255, CV_THRESH_BINARY | CV_THRESH_OTSU);
-		cv::Canny(edge, edge, otsu_thresh_val * 0.2, otsu_thresh_val);
-		imshow("VideoFeed2", edge);
-		//get frame difference
-		processFrameData(frame); //later processFrameData(changedFrame);
-								 //draw each object's bounding box
-		for (int i = 0; i < objects; i++)
+
+		if (useNaiveEdge)
 		{
-			cv::Scalar colour(0, 255, 0);
-			//cv::Rect boundingRect(objectMap[i].x, objectMap[i].y, objectMap[i].width, objectMap[i].height);
-			//rectangle(frame, boundingRect, colour);
-			/*for(int j =0; j < objectMap[i].points.size(); j++)
-				cv::circle(frame, cv::Point(objectMap[i].points[j].x, objectMap[i].points[j].y), 2, colour);*/
-			for (auto f : pSet) {
-				cv::circle(frame, f, 2, colour);
+			cv::Mat edge;
+			Mat waste;
+			cv::cvtColor(frame, edge, CV_BGR2GRAY);
+			double otsu_thresh_val = cv::threshold(edge, waste, 0, 255, CV_THRESH_BINARY | CV_THRESH_OTSU);
+			cv::Canny(edge, edge, otsu_thresh_val * 0.2, otsu_thresh_val);
+			imshow("VideoFeed2", edge);
+			//get frame difference
+			processFrameData(frame); //later processFrameData(changedFrame);
+									 //draw each object's bounding box
+			for (int i = 0; i < objects; i++)
+			{
+				cv::Scalar colour(0, 255, 0);
+				//cv::Rect boundingRect(objectMap[i].x, objectMap[i].y, objectMap[i].width, objectMap[i].height);
+				//rectangle(frame, boundingRect, colour);
+				/*for(int j =0; j < objectMap[i].points.size(); j++)
+					cv::circle(frame, cv::Point(objectMap[i].points[j].x, objectMap[i].points[j].y), 2, colour);*/
+				for (auto f : pSet) {
+					cv::circle(frame, f, 2, colour);
+				}
 			}
+			imshow("VideoFeed3", frame);
+			cv::waitKey(10000);
 		}
-		imshow("VideoFeed3", frame);
-		cv::waitKey(10000);
+		else if (useGraphSLAM)
+		{
+			//runs the graph slam process for the given frame, and returns the current position of the camera as an SE3 object
+			gs.LS_Graph_SLAM(frame);
+		}
 	}
-	/*else
+	else
 	{
 		return false;
-	}*/
+	}
 }

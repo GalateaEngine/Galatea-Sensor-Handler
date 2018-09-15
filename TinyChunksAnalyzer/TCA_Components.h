@@ -47,7 +47,14 @@ public:
 
 	//openCV stuff
 	cv::VideoCapture cap;
+
+	//states
 	bool ready;
+	bool useNaiveEdge = false;
+	bool useGraphSLAM = true;
+
+	//SLAM runners
+	GraphSLAMer gs;
 
 	TCA_Video();
 
