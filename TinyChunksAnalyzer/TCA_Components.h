@@ -40,6 +40,9 @@ public:
 	int objects;
 	map<int, TCA_Object> objectMap;
 	set<cv::Point> pSet;
+	cv::viz::Viz3d viewer;
+	cv::Mat pCloud;
+	cv::Mat colours;
 	cv::Mat lastFrame;
 
 	float colourFudgeMax = 1.8;

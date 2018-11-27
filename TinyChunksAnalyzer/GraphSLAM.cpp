@@ -2,7 +2,14 @@
 
 class GraphSLAMer
 {
-	//prototypes
+
+	//These are my calculated intrinsic camera parameters (Webcam: Logitech C920)
+	//to properly use this program you'll need to find the intrinsic camera parameters for your own webcam/camera, assuming it's a different model
+	//google search "opencv camera calibration" for an easy guide
+	//(Todo: add automatic camera calibration)
+	Mat cameraParams = (Mat_<float>(3, 3) << 5.7481157594243552e+02, 0.0, 320.0, 0.0, 5.7481157594243552e+02, 240.0, 0.0, 0.0, 1.0);
+
+	//function and class prototypes
 	class KeyFrame;
 	class SE3;
 	Mat makeHomo(Mat input);
@@ -11,9 +18,16 @@ class GraphSLAMer
 	double calcPhotometricResidual(Point pixleU, Point projectedPoint, KeyFrame keyframe, Mat image, double rmean);
 	double HuberNorm(double x, double epsilon);
 	Mat projectWorldPointToCameraPointU(Mat cameraParamsK, SE3 cameraPoseT, Mat wPointP);
-	Mat cameraParams;
-	Mat cameraParamsInv;
+
+	
+
+	Mat cameraParamsInv = cameraParams.inv();
 	class QuadTreeNode;
+
+	
+	//look up "lie groups" for more information
+	//contains both the translation and rotation for a given object in 3d space
+	//methods can export the lie matrix, its individual components, or it's applied 3x3 extrinsic matrix
 
 	class SE3
 	{
@@ -122,10 +136,7 @@ class GraphSLAMer
 		double derivatives[16];
 	};
 
-	//look up "lie groups" for more information
-	//contains both the translation and rotation for a given object in 3d space
-	//methods can export the lie matrix, its individual components, or it's applied 3x3 extrinsic matrix
-
+	
 
 	double pixelIntensityNoise = 1.0;
 	double findY(Point pixelU, Point projectedPoint, KeyFrame keyframe, Mat image, double rmean)
@@ -173,20 +184,6 @@ class GraphSLAMer
 		return x;
 	}
 
-	void BuildLinearSystem(Mat &H, Mat &b, Mat x, Mat jacobian, Mat error, Mat information)
-	{
-		//solve for cp such that cp = cpo + dif
-		//dif = 
-
-		//calculate b
-		//1xi * ixi * ix16 =  
-		b = error.t() * information * jacobian;
-
-		//Calc H
-		//16xi * ixi * ix16 = 16x16
-		H = jacobian.t() * information * jacobian;
-	}
-
 	//simple cholesky decomposition
 	cv::Mat MatrixSqrt(cv::Mat a)
 	{
@@ -218,7 +215,7 @@ class GraphSLAMer
 		return ret;
 	}
 
-	//code roughly from my math lib
+	//code roughly from "my math lib"
 	void InvertLowerTriangluar(Mat &l)
 	{
 		int i, j, k;
@@ -292,7 +289,7 @@ class GraphSLAMer
 				Mat p = keyframe.cameraTransformationAndScaleS.getExtrinsicMatrix().t() * piInv(makeHomo(Mat(pixelU)), keyDepthAtU);
 				//project into new image
 				Point projectedPoint = Point(projectWorldPointToCameraPointU(cameraParams, cameraPose, p));
-				//do a bounds check, continue if we are out of range
+				//do a bounds check, skip if we are out of range
 				if (projectedPoint.x < 0 || projectedPoint.y < 0 || projectedPoint.x > image.rows || projectedPoint.y > image.cols) continue;
 				//set inital pixel
 				pPixel npixel;
@@ -1251,7 +1248,7 @@ class GraphSLAMer
 		//convert the nodes into a pixel map
 		projectDepthNodesToDepthMap(lastKey);
 
-		//run makenewkeyframe chack against image quality
+		//run makenewkeyframe check against image quality
 		makeNewKeyframe = false;
 		if (makeNewKeyframe)
 		{
@@ -1266,6 +1263,8 @@ class GraphSLAMer
 			//generate constraints between old keyframe and new one(TO DO)
 			Mat constraints;
 
+			//loop closure check (TO DO)
+
 			//add new keyframe and constraints to list
 			keyframes.E.push_back(constraints);
 			keyframes.V.push_back(newKey);
@@ -1278,16 +1277,25 @@ class GraphSLAMer
 	void Initialize_LS_Graph_SLAM()
 	{
 		//initialize lastpost
+
 		//initialize velocity
+
 		//initialize posegraph
 		keyframes = PoseGraph();
+
 		//initialize camera params
+		//done at the top, hardcoded
 	}
 
 	//passes over keyframes and constraints and returns a list of points
-	std::list<SLAMPoint> get3dPoints()
+	Mat get3dPoints()
 	{
 		
+		for (int kfi = 0; kfi < keyframes.V.size(); kfi++)
+		{
+			SLAMPoint tpoint;
+			
+		}
 	}
 
 };

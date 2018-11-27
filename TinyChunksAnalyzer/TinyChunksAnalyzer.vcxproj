@@ -79,7 +79,7 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
     <ExecutablePath>D:\Downloads\opencv\build\x64\vc15\bin;$(ExecutablePath)</ExecutablePath>
-    <IncludePath>D:\Downloads\opencv\build\include;$(IncludePath)</IncludePath>
+    <IncludePath>D:\ProgrammingLibraries\OpenCV\install\include\;D:\Downloads\opencv\build\include;$(IncludePath)</IncludePath>
     <LibraryPath>D:\Downloads\opencv\build\x64\vc15\lib;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">

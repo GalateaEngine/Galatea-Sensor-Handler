@@ -3,6 +3,7 @@
 
 class SLAMPoint
 {
+public:
 	Point3d location;
 	double colour;
 };
@@ -21,5 +22,5 @@ public:
 	//Sets up matrices and other things
 	void Initialize_LS_Graph_SLAM();
 
-	std::list<SLAMPoint> get3dPoints();
+	Mat get3dPoints();
 };

@@ -18,6 +18,7 @@ TCA_Video::TCA_Video()
 	if (useGraphSLAM)
 	{
 		gs.Initialize_LS_Graph_SLAM();
+		viewer = cv::viz::Viz3d("VideoFeed2");
 	}
 	cv::namedWindow("VideoFeed1");
 	cv::namedWindow("VideoFeed2");
@@ -212,6 +213,13 @@ bool TCA_Video::update()
 		{
 			//runs the graph slam process for the given frame, and returns the current position of the camera as an SE3 object
 			gs.LS_Graph_SLAM(frame);
+
+			//get back current list of 3d points
+			pCloud = gs.get3dPoints();
+			
+			viz::WCloud cloud_widget( pCloud, viz::Color::green());
+			viewer.showWidget("VideoFeed2", cloud_widget);
+			cout << "[DONE]" << endl;
 		}
 	}
 	else
