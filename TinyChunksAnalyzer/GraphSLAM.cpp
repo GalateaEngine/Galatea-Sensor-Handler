@@ -383,8 +383,8 @@ class GraphSLAMer
 	class PoseGraph
 	{
 	public:
-		std::list<KeyFrame> V;
-		std::list<Mat> E; //sim(3) constraints between keyframes
+		std::vector<KeyFrame> V;
+		std::vector<Mat> E; //sim(3) constraints between keyframes
 	};
 
 	//predicts new position based on dampened approximate velocity
@@ -1260,8 +1260,8 @@ class GraphSLAMer
 			//computes the power tree for the image, allowing for fast analysis 
 			ComputeQuadtreeForKeyframe(newKey);
 
-			//generate constraints between old keyframe and new one(TO DO)
-			Mat constraints;
+			//generate constraints between old keyframe and new one(Aka stores the cameras approximate new position)
+			Mat constraints = position.getLieMatrix();
 
 			//loop closure check (TO DO)
 
@@ -1290,12 +1290,30 @@ class GraphSLAMer
 	//passes over keyframes and constraints and returns a list of points
 	Mat get3dPoints()
 	{
+		std::vector<Vec3f> pcloud_est;
+		//extract some important values from our camera matrix
+		float cx_d = cameraParams.at<float>(0, 2);
+		float cy_d = cameraParams.at<float>(1, 2);
+		float fx_d = cameraParams.at<float>(0, 0);
+		float fy_d = cameraParams.at<float>(1, 1);
 		
+		//cycle through the depth maps, converting the depths into points using the camera position
 		for (int kfi = 0; kfi < keyframes.V.size(); kfi++)
 		{
-			SLAMPoint tpoint;
-			
+			Mat depths = 1.0/keyframes.V[kfi].inverseDepthD;
+			for (int px = 0; px < depths.rows; px++)
+			{
+				for (int py = 0; py < depths.cols; py++)
+				{
+					float x = (px - cx_d) * depths.at<float>(px, py) / fx_d;//(x_d - cx_d) * depth(x_d, y_d) / fx_d;
+					float y = (py - cy_d) * depths.at<float>(px, py) / fy_d;
+					float z = depths.at<float>(px, py);
+					pcloud_est.push_back(Vec3f(x,y,z));
+				}
+			}
 		}
+
+		return Mat(pcloud_est);
 	}
 
 };
