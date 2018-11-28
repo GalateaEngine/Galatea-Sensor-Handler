@@ -17,7 +17,9 @@ TCA_Video::TCA_Video()
 	bool useGraphSLAM = true;
 	if (useGraphSLAM)
 	{
-		gs.Initialize_LS_Graph_SLAM();
+		Mat frame;
+		cap >> frame;
+		gs.Initialize_LS_Graph_SLAM(frame);
 		viewer = cv::viz::Viz3d("VideoFeed2");
 	}
 	cv::namedWindow("VideoFeed1");
@@ -30,18 +32,13 @@ TCA_Video::~TCA_Video()
 
 }
 
-cv::Mat calcFrameDifference(cv::Mat oldFrame, cv::Mat newFrame)
-{
-	return cv::Mat();
-}
-
-bool TCA_Video::findNearbyPoint(cv::Point start, int width, int height, set<cv::Point>& set, cv::Point& hit)
+bool TCA_Video::findNearbyPoint(cv::Point2f start, int width, int height, set<cv::Point2f>& set, cv::Point2f& hit)
 {
 	for (int x = -3; x < 4; x++)
 	{
 		for (int y = -3; y < 4; y++)
 		{
-			cv::Point npoint(start.x + x, start.y + y);
+			cv::Point2f npoint(start.x + x, start.y + y);
 			if ((x == 0 && y == 0) || npoint.x > width || npoint.y > height || npoint.x < 0 || npoint.y < 0) continue;
 			//if hit
 			if (set.count(npoint))
@@ -61,8 +58,8 @@ bool TCA_Video::processFrameData(cv::Mat data)
 	//for each row(this can be parallelized later)
 	int width = data.cols;
 	int height = data.rows;
-	map<cv::Point, cv::Vec3b> changeMap;
-	set<cv::Point> changeList;
+	map<cv::Point2f, cv::Vec3b> changeMap;
+	set<cv::Point2f> changeList;
 	for (int rowIndex = 0; rowIndex < width; rowIndex++)
 	{
 		cv::Vec3b lastPixel = data.at<cv::Vec3b>(cv::Point(0, 0));
@@ -79,7 +76,7 @@ bool TCA_Video::processFrameData(cv::Mat data)
 
 			if (matches < 3)
 			{
-				cv::Point tpoint = cv::Point(rowIndex, i);
+				cv::Point2f tpoint = cv::Point(rowIndex, i);
 				changeList.emplace(tpoint);
 				changeMap.emplace(tpoint, pixel);
 			}
@@ -92,9 +89,9 @@ bool TCA_Video::processFrameData(cv::Mat data)
 	while (changeList.size() > 0)
 	{
 		//get top point
-		cv::Point tpoint = *(changeList.begin());
+		cv::Point2f tpoint = *(changeList.begin());
 		//set origin as top point
-		cv::Point origin = tpoint;
+		cv::Point2f origin = tpoint;
 		//create new object and add first point
 		TCA_Object obj;
 		obj.numpoints++;
@@ -112,7 +109,7 @@ bool TCA_Video::processFrameData(cv::Mat data)
 		while (running)
 		{
 			//check all immediate surrounding locations in change array
-			cv::Point hit;
+			cv::Point2f hit;
 			bool foundPoint = findNearbyPoint(tpoint, width, height, changeList, hit);
 			//if no hit go to origin and continue searching from there, set origin to top and top to found point
 			if (!foundPoint && !resetOrigin)
@@ -121,7 +118,7 @@ bool TCA_Video::processFrameData(cv::Mat data)
 				foundPoint = findNearbyPoint(origin, width, height, changeList, hit);
 				origin = tpoint;
 			}
-			//if still no hit search whole array list for closest node with colour match (later junk)
+			//if still no hit search whole array list for closest node with colour cv::Match (later junk)
 			//if hit
 			if (foundPoint)
 			{
@@ -187,7 +184,7 @@ bool TCA_Video::update()
 		if (useNaiveEdge)
 		{
 			cv::Mat edge;
-			Mat waste;
+			cv::Mat waste;
 			cv::cvtColor(frame, edge, CV_BGR2GRAY);
 			double otsu_thresh_val = cv::threshold(edge, waste, 0, 255, CV_THRESH_BINARY | CV_THRESH_OTSU);
 			cv::Canny(edge, edge, otsu_thresh_val * 0.2, otsu_thresh_val);
@@ -221,6 +218,7 @@ bool TCA_Video::update()
 			viewer.showWidget("VideoFeed2", cloud_widget);
 			cout << "[DONE]" << endl;
 		}
+		return true;
 	}
 	else
 	{

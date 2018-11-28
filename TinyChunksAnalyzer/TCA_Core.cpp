@@ -10,7 +10,6 @@ TCA_Core::TCA_Core(bool videoEnabled, bool audioEnabled, bool textEnabled)
 		VidEnabled = true;
 		//vid = TCA_Video();
 		//enable and set up SLAM algo
-		GS.Initialize_LS_Graph_SLAM();
 	}
 
 }

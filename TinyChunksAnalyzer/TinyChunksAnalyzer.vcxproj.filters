@@ -54,4 +54,69 @@
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
+  <ItemGroup>
+    <Library Include="D:\ProgrammingLibraries\OpenCV\install\x64\vc15\lib\opencv_calib3d341.lib">
+      <Filter>Resource Files</Filter>
+    </Library>
+    <Library Include="D:\ProgrammingLibraries\OpenCV\install\x64\vc15\lib\opencv_core341.lib">
+      <Filter>Resource Files</Filter>
+    </Library>
+    <Library Include="D:\ProgrammingLibraries\OpenCV\install\x64\vc15\lib\opencv_cudev341.lib">
+      <Filter>Resource Files</Filter>
+    </Library>
+    <Library Include="D:\ProgrammingLibraries\OpenCV\install\x64\vc15\lib\opencv_dnn341.lib">
+      <Filter>Resource Files</Filter>
+    </Library>
+    <Library Include="D:\ProgrammingLibraries\OpenCV\install\x64\vc15\lib\opencv_features2d341.lib">
+      <Filter>Resource Files</Filter>
+    </Library>
+    <Library Include="D:\ProgrammingLibraries\OpenCV\install\x64\vc15\lib\opencv_flann341.lib">
+      <Filter>Resource Files</Filter>
+    </Library>
+    <Library Include="D:\ProgrammingLibraries\OpenCV\install\x64\vc15\lib\opencv_highgui341.lib">
+      <Filter>Resource Files</Filter>
+    </Library>
+    <Library Include="D:\ProgrammingLibraries\OpenCV\install\x64\vc15\lib\opencv_imgcodecs341.lib">
+      <Filter>Resource Files</Filter>
+    </Library>
+    <Library Include="D:\ProgrammingLibraries\OpenCV\install\x64\vc15\lib\opencv_imgproc341.lib">
+      <Filter>Resource Files</Filter>
+    </Library>
+    <Library Include="D:\ProgrammingLibraries\OpenCV\install\x64\vc15\lib\opencv_ml341.lib">
+      <Filter>Resource Files</Filter>
+    </Library>
+    <Library Include="D:\ProgrammingLibraries\OpenCV\install\x64\vc15\lib\opencv_objdetect341.lib">
+      <Filter>Resource Files</Filter>
+    </Library>
+    <Library Include="D:\ProgrammingLibraries\OpenCV\install\x64\vc15\lib\opencv_photo341.lib">
+      <Filter>Resource Files</Filter>
+    </Library>
+    <Library Include="D:\ProgrammingLibraries\OpenCV\install\x64\vc15\lib\opencv_shape341.lib">
+      <Filter>Resource Files</Filter>
+    </Library>
+    <Library Include="D:\ProgrammingLibraries\OpenCV\install\x64\vc15\lib\opencv_stitching341.lib">
+      <Filter>Resource Files</Filter>
+    </Library>
+    <Library Include="D:\ProgrammingLibraries\OpenCV\install\x64\vc15\lib\opencv_superres341.lib">
+      <Filter>Resource Files</Filter>
+    </Library>
+    <Library Include="D:\ProgrammingLibraries\OpenCV\install\x64\vc15\lib\opencv_video341.lib">
+      <Filter>Resource Files</Filter>
+    </Library>
+    <Library Include="D:\ProgrammingLibraries\OpenCV\install\x64\vc15\lib\opencv_videoio341.lib">
+      <Filter>Resource Files</Filter>
+    </Library>
+    <Library Include="D:\ProgrammingLibraries\OpenCV\install\x64\vc15\lib\opencv_videostab341.lib">
+      <Filter>Resource Files</Filter>
+    </Library>
+    <Library Include="D:\ProgrammingLibraries\OpenCV\install\x64\vc15\lib\opencv_viz341.lib">
+      <Filter>Resource Files</Filter>
+    </Library>
+    <Library Include="D:\ProgrammingLibraries\OpenCV\install\x64\vc15\lib\opencv_world341.lib">
+      <Filter>Resource Files</Filter>
+    </Library>
+    <Library Include="D:\ProgrammingLibraries\OpenCV\install\x64\vc15\lib\opencv_world341d.lib">
+      <Filter>Resource Files</Filter>
+    </Library>
+  </ItemGroup>
 </Project>

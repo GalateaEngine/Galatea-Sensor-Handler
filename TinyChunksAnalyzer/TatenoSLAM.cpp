@@ -19,7 +19,7 @@ void Tateno_Monocular_SLAM()
 	//t: frame
 
 	//T^kit: current camera pose. Composed of [Rt, tt] where:
-	//Rt: 3x3 rotation matrix, ∈ SO(3)
+	//Rt: 3x3 rotation cv::Matrix, ∈ SO(3)
 	//tt: 3d translation vector, ∈ R^3
 
 	//It: intensity image of frame t
@@ -29,7 +29,7 @@ void Tateno_Monocular_SLAM()
 
 	//For each new frame t:
 	//First calc Tkit
-	//The transformation between the current camera pose and the last keyframe is given by the diference in intensity maps
+	//The transforcv::Mation between the current camera pose and the last keyframe is given by the diference in intensity maps
 	//via a weighted Gauss-Newton optomization
 }
 

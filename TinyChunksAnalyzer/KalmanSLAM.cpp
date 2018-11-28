@@ -19,7 +19,7 @@ cv::Mat hPreCalc;
 //Contains the equations to predict robot motion between the last step and the current step given the controls input
 cv::Mat g(cv::Mat meanPos, cv::Mat controlCommand)
 {
-	//generate "guide" matrix so we only affect the columns we want to, but only once
+	//generate "guide" cv::Matrix so we only affect the columns we want to, but only once
 	if (generateGuide)
 	{
 		F = cv::Mat(2 * (numDimensions + 1) + 3, numDimensions, CV_64FC1, double(0));//PRE TRANSPOSED
@@ -47,10 +47,10 @@ cv::Mat g(cv::Mat meanPos, cv::Mat controlCommand)
 	return meanPos + (F * vM);
 }
 
-//Generates and applies the Jacobian matrix to the input function to make it linear for the given time frame
+//Generates and applies the Jacobian cv::Matrix to the input function to make it linear for the given time frame
 cv::Mat CalcSigmaBar(cv::Mat controlCommand)
 {
-	//Generate Jacobian matrix G(t)^x
+	//Generate Jacobian cv::Matrix G(t)^x
 	cv::Mat Gtx(numDimensions + 1, numDimensions + 1, CV_64FC1, double(0));
 	cv::Mat GtxTranspose(numDimensions + 1, numDimensions + 1, CV_64FC1, double(0));
 
@@ -83,10 +83,10 @@ cv::Mat CalcSigmaBar(cv::Mat controlCommand)
 	return sigmaBar;
 }
 
-//Generates and applies the Jacobian matrix to the input function to make it linear for the given time frame
+//Generates and applies the Jacobian cv::Matrix to the input function to make it linear for the given time frame
 cv::Mat CalcOmegaBar(cv::Mat controlCommand, cv::Mat omegaInv)
 {
-	//Generate Jacobian matrix G(t)^x
+	//Generate Jacobian cv::Matrix G(t)^x
 	cv::Mat Gtx(numDimensions + 1, numDimensions + 1, CV_64FC1, double(0));
 	cv::Mat GtxTranspose(numDimensions + 1, numDimensions + 1, CV_64FC1, double(0));
 
@@ -140,7 +140,7 @@ cv::Mat calcHit(cv::Mat sigmaBar, cv::Mat uBar, cv::Mat landmarks, int landmarkI
 	}
 
 	//set x and y for point
-	cv::Point lmp = landmarkDB[landmarkID];
+	cv::Point2f lmp = landmarkDB[landmarkID];
 	double landmarkX = lmp.x;
 	double landmarkY = lmp.y;
 
@@ -150,15 +150,15 @@ cv::Mat calcHit(cv::Mat sigmaBar, cv::Mat uBar, cv::Mat landmarks, int landmarkI
 	delta.at<double>(1, 0) = landmarkY - uBar.at<double>(0, 1);
 	cv::Mat deltaT;
 	cv::transpose(delta, deltaT);
-	cv::Mat qmat = deltaT * delta;
-	double q = qmat.at<double>(0, 0);
+	cv::Mat qMat = deltaT * delta;
+	double q = qMat.at<double>(0, 0);
 	double h1 = sqrt(q);
 	double h2 = atan2(delta.at<double>(1, 0), delta.at<double>(0, 0)) - uBar.at<double>(0, 2);
 	//store this for when we need it later
 	hPreCalc.at<double>(0) = h1;
 	hPreCalc.at<double>(1) = h2;
 
-	//put values directly into Hit matrix to save on generating F2
+	//put values directly into Hit cv::Matrix to save on generating F2
 	Hit.at<double>(0, 0) += (-1 * sqrt(q) * delta.at<double>(0, 0));
 	Hit.at<double>(1, 0) += delta.at<double>(0, 1);
 
@@ -393,7 +393,7 @@ void Unscented_Kalman_Filter(cv::Mat Landmarks, cv::Mat controls)
 	meanPos = u;
 }
 
-//implements the slightly more efficient information filter
+//implements the slightly more efficient inforcv::Mation filter
 //Landmarks structure: each row has ID, distance reading, sensor rotation
 cv::Mat omega;
 cv::Mat psi;

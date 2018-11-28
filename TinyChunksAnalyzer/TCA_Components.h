@@ -9,8 +9,8 @@ using namespace std;
 
 struct Line
 {
-	cv::Point start;
-	cv::Point end;
+	cv::Point2f start;
+	cv::Point2f end;
 	float colourDif;
 };
 
@@ -21,7 +21,7 @@ public:
 
 	int numpoints;
 	int numobjects;
-	vector<cv::Point> points;
+	vector<cv::Point2f> points;
 	list<Line> lines;
 	float relative_direction;
 	float relative_speed;
@@ -39,7 +39,7 @@ class TCA_Video
 public:
 	int objects;
 	map<int, TCA_Object> objectMap;
-	set<cv::Point> pSet;
+	set<cv::Point2f> pSet;
 	cv::viz::Viz3d viewer;
 	cv::Mat pCloud;
 	cv::Mat colours;
@@ -63,14 +63,10 @@ public:
 
 	~TCA_Video();
 
-	cv::Mat calcFrameDifference(cv::Mat oldFrame, cv::Mat newFrame);
-
-	bool findNearbyPoint(cv::Point start, int width, int height, set<cv::Point>& set, cv::Point& hit);
+	bool findNearbyPoint(cv::Point2f start, int width, int height, set<cv::Point2f>& set, cv::Point2f& hit);
 
 	//object finder with naive edge finder
 	bool processFrameData(cv::Mat data);
-
-
 
 	bool update();
 
