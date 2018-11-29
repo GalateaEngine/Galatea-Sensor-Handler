@@ -35,7 +35,7 @@ public:
 		{
 			//create proper size matrices at origin
 			translation = cv::Mat::zeros(1, 3, CV_64FC1);
-			rotation = cv::Mat::zeros(3, 3, CV_64FC1);
+			rotation = cv::Mat::eye(3, 3, CV_64FC1);
 
 			lieMat = cv::Mat::zeros(4, 4, CV_64FC1);
 			//set rotation
@@ -162,9 +162,16 @@ public:
 	class pPixel
 	{
 	public:
+		pPixel()
+		{
+			for (int i = 0; i < 16; i++)
+			{
+				derivatives[i] = 0.0;
+			}
+		}
 		cv::Point2f imagePixel;
 		cv::Point2f keyframePixel;
-		cv::Mat worldPoint;
+		cv::Point3d worldPoint;
 		double depth;
 		double residualSum;
 		double keyframeIntensity;
@@ -191,7 +198,7 @@ public:
 	PoseGraph keyframes;
 	KeyFrame lastKey;
 
-	double findY(cv::Point2f pixelU, cv::Point2f projectedPoint, GraphSLAMer::KeyFrame keyframe, cv::Mat image, double rmean);
+	double findY(double kfPixelSum, double kfPixelVariance, cv::Point2i projectedPoint, cv::Mat &image, double rmean);
 
 	//turns the given point into a homogeneouse point
 	cv::Mat makeHomo(cv::Mat x);
@@ -210,23 +217,22 @@ public:
 	double CalcErrorVal(std::vector<pPixel> residuals);
 
 
-	double derivative(cv::Mat cameraPose, cv::Mat worldPointP, cv::Point2f pixelU, KeyFrame keyframe, cv::Mat image, double rmean, int bIndexX, int bIndexY);
+	double derivative(cv::Mat & cameraPose, cv::Point3d worldPointP, double pixelSum, double kfPixelVariance, cv::Mat & image, double rmean, int bIndexX, int bIndexY);
 
-	std::vector<pPixel> ComputeJacobian(cv::Mat cameraParams, SE3 cameraPose, KeyFrame keyframe, cv::Mat image, double rmean, int numRes);
+	std::vector<pPixel> ComputeJacobian(cv::Mat & cameraParams, SE3 cameraPose, KeyFrame keyframe, cv::Mat & image, double rmean, int numRes);
 
-	std::vector<pPixel> ComputeResiduals(cv::Mat cameraParams, SE3 cameraPose, KeyFrame keyframe, cv::Mat image, double rmean);
+	std::vector<pPixel> ComputeResiduals(cv::Mat & cameraParams, SE3 cameraPose, KeyFrame keyframe, cv::Mat & image, double rmean);
 
 
 	//predicts new position based on dampened approximate velocity
 	void forwardPredictPosition(cv::Mat &lastPos, cv::Mat &Velocity);
 
-	//projects 3d point input into 2d space
-	cv::Mat pi(cv::Mat input);
 
-	cv::Mat piInv(cv::Mat input, double invDepth);
+	//turns the world point into a pixel value
+	cv::Point projectWorldPointToCameraPointU(cv::Mat & cameraParamsInv, cv::Mat & cameraPoseT, cv::Point3d wPointP);
 
-	//puts the projected point from pi into camera space
-	cv::Mat projectWorldPointToCameraPointU(cv::Mat cameraParamsK, cv::Mat cameraPoseT, cv::Mat wPointP);
+	//turns a pixel value into a world point
+	cv::Point3d projectCameraPointToWorldPointP(cv::Mat & cameraParamsK, cv::Mat & cameraPoseT, cv::Point cPointU, double depth);
 
 
 	double HuberNorm(double x, double epsilon);
@@ -234,20 +240,20 @@ public:
 	cv::Mat CalcErrorVec(std::vector<pPixel> pixels);
 
 	//pixel U is in fact an index
-	double calcPhotometricResidual(cv::Point2f pixelU, cv::Point2f projectedPoint, KeyFrame keyframe, cv::Mat imageT, double globalResidue);
+	double calcPhotometricResidual(double kfPixelSum, cv::Point2i projectedPoint, cv::Mat & imageT, double globalResidue);
 
-	void ComputeMedianResidualAndCorrectedPhotometricResiduals(cv::Mat cameraParams, SE3 cameraPose, cv::Mat image, KeyFrame kf, std::vector<pPixel> & results, double & median);
+	void ComputeMedianResidualAndCorrectedPhotometricResiduals(cv::Mat & cameraParams, SE3 cameraPose, cv::Mat & image, KeyFrame kf, std::vector<pPixel> & results, double & median);
 
 
 	//computes the update
-	cv::Mat TransformJacobian(cv::Mat jacobian, cv::Mat residuals);
+	cv::Mat TransformJacobian(cv::Mat & jacobian, cv::Mat & residuals);
 
-	SE3 CalcGNPosOptimization(cv::Mat image, KeyFrame keyframe);
+	SE3 CalcGNPosOptimization(cv::Mat & image, KeyFrame keyframe);
 
 	void ComputeQuadtreeForKeyframe(KeyFrame &kf);
 
 	//calculates the depths by comparing the image, after plcement into a power of 2 pyramid, against the keyframe quadtree leaves
-	void computeDepthsFromStereoPair(KeyFrame kf, cv::Mat image, cv::Mat cameraParams, SE3 cameraPos);
+	void computeDepthsFromStereoPair(KeyFrame kf, cv::Mat & image, cv::Mat & cameraParams, SE3 cameraPos);
 
 	void projectDepthNodesToDepthMap(KeyFrame kf);
 

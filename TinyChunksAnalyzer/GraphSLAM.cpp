@@ -2,18 +2,18 @@
 #include "stdafx.h"
 
 
-double GraphSLAMer::findY(cv::Point2f pixelU, cv::Point2f projectedPoint, GraphSLAMer::KeyFrame keyframe, cv::Mat image, double rmean)
+double GraphSLAMer::findY(double kfPixelSum, double kfPixelVariance, cv::Point2i projectedPoint, cv::Mat &image, double rmean)
 {
 	double pixelIntensityNoise = 1.0;
 
 	//calc photometric residue
-	double r = calcPhotometricResidual(pixelU, projectedPoint, keyframe, image, rmean);
+	double r = calcPhotometricResidual(kfPixelSum, projectedPoint, image, rmean);
 
 	//Im not exactly sure if this is right? It's asking the derivate of a constant with respect to a constant. 
 	//The literal meaning of derviate would lead me to believe it's the calculated photometric residual, but why be so unclear?
 	//(See eq. 6 in the paper)
 	double photoDeriv = r;
-	double pixelVar = pixelIntensityNoise + (photoDeriv * photoDeriv) * keyframe.inverseDepthVarianceV.at<double>(pixelU);
+	double pixelVar = pixelIntensityNoise + (photoDeriv * photoDeriv) * kfPixelVariance;
 
 	return HuberNorm(r / pixelVar, 1);
 }
@@ -46,7 +46,7 @@ cv::Mat GraphSLAMer::deHomo(cv::Mat xbar)
 {
 	int size = xbar.rows;
 	int cols = xbar.cols;
-	static cv::Mat x(size - 1, cols, CV_64FC1);
+	cv::Mat x(size - 1, cols, CV_64FC1);
 	for (int j = 0; j < cols; j++)
 	{
 		int i = 0;
@@ -64,7 +64,7 @@ cv::Mat GraphSLAMer::MatrixSqrt(cv::Mat a)
 {
 	int n = a.cols;
 
-	cv::Mat ret(n, n, CV_64FC1);
+	cv::Mat ret = cv::Mat::eye(n, n, CV_64FC1);
 	for (int r = 0; r < n; r++)
 	{
 		for (int c = 0; c <= r; c++)
@@ -76,6 +76,10 @@ cv::Mat GraphSLAMer::MatrixSqrt(cv::Mat a)
 				{
 					sum += ret.at<double>(c, j) * ret.at<double>(c, j);
 				}
+				if (a.at<double>(c, c) - sum <= 0)
+				{
+					std::cout << a.at<double>(c, c) - sum << std::endl;
+				}
 				ret.at<double>(c, c) = sqrt(a.at<double>(c, c) - sum);
 			}
 			else
@@ -83,6 +87,10 @@ cv::Mat GraphSLAMer::MatrixSqrt(cv::Mat a)
 				double sum = 0;
 				for (int j = 0; j < c; j++)
 					sum += ret.at<double>(r, j) * ret.at<double>(c, j);
+				if (ret.at<double>(c, c) <= 0)
+				{
+					std::cout << ret.at<double>(c, c) << std::endl;
+				}
 				ret.at<double>(r, c) = (1.0 / ret.at<double>(c, c)) * (a.at<double>(r, c) - sum);
 			}
 		}
@@ -137,28 +145,29 @@ double GraphSLAMer::CalcErrorVal(std::vector<pPixel> residuals)
 }
 
 
-double GraphSLAMer::derivative(cv::Mat cameraPose, cv::Mat worldPointP, cv::Point2f pixelU, KeyFrame keyframe, cv::Mat image, double rmean, int bIndexX, int bIndexY) //b is our guessed position, x a given pixel
+double GraphSLAMer::derivative(cv::Mat & cameraPose, cv::Point3d worldPointP, double pixelSum, double kfPixelVariance, cv::Mat & image, double rmean, int bIndexX, int bIndexY) //b is our guessed position, x a given pixel
 {
-	double alpha = 1e-6;
+	double alpha = 1e-7;
 	cameraPose.at<double>(bIndexX, bIndexY) += alpha;
-	cv::Point projectedPoint = cv::Point(projectWorldPointToCameraPointU(cameraParams, cameraPose, worldPointP));
+	cv::Point projectedPoint = projectWorldPointToCameraPointU(cameraParams, cameraPose, worldPointP);
 	//do a bounds check, return 0 if its out of range (wait, we need a continuous function???)
-	if (projectedPoint.x < 0 || projectedPoint.y < 0 || projectedPoint.x > image.rows || projectedPoint.y > image.cols) return 0;
-	double y1 = findY(pixelU, projectedPoint, keyframe, image, rmean);
+	if (projectedPoint.x < 0 || projectedPoint.y < 0 || projectedPoint.x >= image.rows || projectedPoint.y >= image.cols) return 0;
+	double y1 = findY(pixelSum, kfPixelVariance, projectedPoint, image, rmean);
 	cameraPose.at<double>(bIndexX, bIndexY) -= (alpha * 2);
 	projectedPoint = cv::Point(projectWorldPointToCameraPointU(cameraParams, cameraPose, worldPointP));
 	//do a bounds check, return 0 if its out of range (wait, we need a continuous function???)
-	if (projectedPoint.x < 0 || projectedPoint.y < 0 || projectedPoint.x > image.rows || projectedPoint.y > image.cols) return 0;
-	double y2 = findY(pixelU, projectedPoint, keyframe, image, rmean);
+	if (projectedPoint.x < 0 || projectedPoint.y < 0 || projectedPoint.x >= image.rows || projectedPoint.y >= image.cols) return 0;
+	double y2 = findY(pixelSum, kfPixelVariance, projectedPoint, image, rmean);
 	cameraPose.at<double>(bIndexX, bIndexY) += alpha;
 	return (y1 - y2) / (2 * alpha);
 }
 
-std::vector<GraphSLAMer::pPixel> GraphSLAMer::ComputeJacobian(cv::Mat cameraParams, SE3 cameraPose, KeyFrame keyframe, cv::Mat image, double rmean, int numRes)//b is our guessed position, x is our pixel info, y is residual
+std::vector<GraphSLAMer::pPixel> GraphSLAMer::ComputeJacobian(cv::Mat & cameraParams, SE3 cameraPose, KeyFrame keyframe, cv::Mat & image, double rmean, int numRes)//b is our guessed position, x is our pixel info, y is residual
 {
-	std::vector<pPixel> jacobianResults;
+	pPixel jacobianResults;
 
-
+	cv::Mat camTrans;
+	cv::Mat keyTrans;
 
 	//for our image
 	for (int x = 0; x < image.cols; x++)
@@ -169,19 +178,18 @@ std::vector<GraphSLAMer::pPixel> GraphSLAMer::ComputeJacobian(cv::Mat cameraPara
 			cv::Point pixelU = cv::Point(x, y);
 			double keyDepthAtU = keyframe.inverseDepthD.at<double>(pixelU);
 			//project into world space
-			cv::Mat p = keyframe.cameraTransformationAndScaleS.getlieMatrix() * makeHomo(cameraParamsInv * piInv(makeHomo(cv::Mat(pixelU)), keyDepthAtU));
+			keyTrans = keyframe.cameraTransformationAndScaleS.getlieMatrix();
+			cv::Point3d p = projectCameraPointToWorldPointP(cameraParams, keyTrans, cv::Point2i(pixelU), keyDepthAtU);
 			//project into new image
-			cv::Point projectedPoint = cv::Point(projectWorldPointToCameraPointU(cameraParams, cameraPose.getlieMatrix(), p));
+			camTrans = cameraPose.getlieMatrix();
+			cv::Point projectedPoint = projectWorldPointToCameraPointU(cameraParams, camTrans, p);
 			//do a bounds check, skip if we are out of range
-			if (projectedPoint.x < 0 || projectedPoint.y < 0 || projectedPoint.x > image.rows || projectedPoint.y > image.cols) continue;
-			//set inital pixel
-			pPixel npixel;
-			npixel.keyframePixel = pixelU;
-			npixel.imagePixel = projectedPoint;
-			npixel.worldPoint = p;
-			npixel.depth = keyframe.inverseDepthD.at<double>(pixelU);;
-			npixel.keyframeIntensity = cv::sum(keyframe.scaledImageI.at<Vec3b>(pixelU))[0];
-			jacobianResults.push_back(pPixel());
+			if (projectedPoint.x < 0 || projectedPoint.y < 0 || projectedPoint.x >= image.rows || projectedPoint.y >= image.cols) continue;
+
+			//store our image strength at pixelu and its variance
+			double kfPixelSum = keyframe.scaledImageI.at<Vec3b>(pixelU)[0] + keyframe.scaledImageI.at<Vec3b>(pixelU)[1] + keyframe.scaledImageI.at<Vec3b>(pixelU)[2];
+			double kfPixelVariance = keyframe.inverseDepthVarianceV.at<double>(pixelU);
+
 			//for the sim(3) vars
 			cv::Mat camMat = cameraPose.getlieMatrix();
 			for (int i = 0; i < camMat.rows; i++)
@@ -190,17 +198,22 @@ std::vector<GraphSLAMer::pPixel> GraphSLAMer::ComputeJacobian(cv::Mat cameraPara
 				{
 					//compute this section of the jacobian and store for jacobian compilation
 					//jc.at<double>((x * image.rows) + y, (i * b.rows) + j) = derivative(cameraParams, b, pixelU, projectedPoint, keyframe, image, rmean, i, j);
-					jacobianResults.back().derivatives[(i * camMat.cols) + j] = derivative(camMat, p, pixelU, keyframe, image, rmean, i, j);
+					jacobianResults.derivatives[(i * camMat.cols) + j] += derivative(camMat, p, kfPixelSum, kfPixelVariance, image, rmean, i, j);
 				}
 			}
 		}
 	}
-	return jacobianResults;
+	std::vector<pPixel> rvec = std::vector<pPixel>();
+	rvec.push_back(jacobianResults);
+	return rvec;
 }
 
-std::vector<GraphSLAMer::pPixel> GraphSLAMer::ComputeResiduals(cv::Mat cameraParams, SE3 cameraPose, KeyFrame keyframe, cv::Mat image, double rmean)//b is our guessed position, x is our pixel info, y is residual
+std::vector<GraphSLAMer::pPixel> GraphSLAMer::ComputeResiduals(cv::Mat & cameraParams, SE3 cameraPose, KeyFrame keyframe, cv::Mat & image, double rmean)//b is our guessed position, x is our pixel info, y is residual
 {
 	std::vector<pPixel> results;
+
+	cv::Mat camTrans;
+	cv::Mat keyTrans;
 
 	//for our image
 	for (int x = 0; x < image.cols; x++)
@@ -211,11 +224,18 @@ std::vector<GraphSLAMer::pPixel> GraphSLAMer::ComputeResiduals(cv::Mat cameraPar
 			cv::Point pixelU = cv::Point(x, y);
 			double keyDepthAtU = keyframe.inverseDepthD.at<double>(pixelU);
 			//project into world space
-			cv::Mat p = keyframe.cameraTransformationAndScaleS.getlieMatrix() * makeHomo(cameraParamsInv * piInv(makeHomo(cv::Mat(pixelU)), keyDepthAtU));
+			keyTrans = keyframe.cameraTransformationAndScaleS.getlieMatrix();
+			cv::Point3d p = projectCameraPointToWorldPointP(cameraParams, keyTrans, cv::Point2i(pixelU), keyDepthAtU);
 			//project into new image
-			cv::Point projectedPoint = cv::Point(projectWorldPointToCameraPointU(cameraParams, cameraPose.getlieMatrix(), p));
+			camTrans = cameraPose.getlieMatrix();
+			cv::Point projectedPoint = projectWorldPointToCameraPointU(cameraParams, camTrans, p);
 			//do a bounds check, continue if we are out of range
 			if (projectedPoint.x < 0 || projectedPoint.y < 0 || projectedPoint.x > image.rows || projectedPoint.y > image.cols) continue;
+
+			//store our image strength at pixelu and its variance
+			double kfPixelSum = keyframe.scaledImageI.at<Point3i>(pixelU).x + keyframe.scaledImageI.at<Point3i>(pixelU).y + keyframe.scaledImageI.at<Point3i>(pixelU).z;
+			double kfPixelVariance = keyframe.inverseDepthVarianceV.at<double>(pixelU);
+
 			//set inital pixel
 			pPixel npixel;
 			npixel.keyframePixel = pixelU;
@@ -223,7 +243,7 @@ std::vector<GraphSLAMer::pPixel> GraphSLAMer::ComputeResiduals(cv::Mat cameraPar
 			npixel.worldPoint = p;
 			npixel.depth = keyframe.inverseDepthD.at<double>(pixelU);;
 			npixel.keyframeIntensity = cv::sum(keyframe.scaledImageI.at<Vec3b>(pixelU))[0];
-			npixel.residualSum = findY(pixelU, projectedPoint, keyframe, image, rmean);
+			npixel.residualSum = findY(kfPixelSum, kfPixelVariance, projectedPoint, image, rmean);
 			results.push_back(pPixel());
 		}
 	}
@@ -258,41 +278,64 @@ void GraphSLAMer::forwardPredictPosition(cv::Mat &lastPos, cv::Mat &Velocity)
 
 
 
-
-//projects 3d point input into 2d space
-cv::Mat GraphSLAMer::pi(cv::Mat input)
+//puts the projected point from pi into camera space
+cv::Point2i GraphSLAMer::projectWorldPointToCameraPointU(cv::Mat & cameraParamsK, cv::Mat & cameraPoseT, cv::Point3d wPointP)
 {
-	cv::Mat output(2, 1, CV_64FC1);
-	//Not sure we need the dbz protection, test this later, perhaps we can pixle offset higher up the chain
-	output.at<double>(0, 0) = input.at<double>(0, 0) / (input.at<double>(2, 0) + 0.00001);
-	output.at<double>(1, 0) = input.at<double>(1, 0) / (input.at<double>(2, 0) + 0.00001);
-	return output;
-}
+	Point p;
 
-cv::Mat GraphSLAMer::piInv(cv::Mat input, double invDepth)
-{
-	//dbz check
-	if (invDepth == 0) invDepth += 0.00001;
+	double * cpPoint0 = cameraParams.ptr<double>(0);
+	double * cpPoint1 = cameraParams.ptr<double>(1);
 
-	cv::Mat output(3, 1, CV_64FC1);
-	//Not sure we need the dbz protection, test this later, perhaps we can pixle offset higher up the chain
-	//heyo its mayo turns out we do need it
-	output.at<double>(0, 0) = input.at<double>(0, 0) / (1.0 / invDepth);
-	output.at<double>(1, 0) = input.at<double>(1, 0) / (1.0 / invDepth);
-	output.at<double>(2, 0) = input.at<double>(2, 0) / (1.0 / invDepth);
-	return output;
+	float cx_d = cpPoint0[2];
+	float cy_d = cpPoint1[2];
+	float fx_d = cpPoint0[0];
+	float fy_d = cpPoint1[1];
+
+	double * cPosePoint0 = cameraPoseT.ptr<double>(0);
+	double * cPosePoint1 = cameraPoseT.ptr<double>(1);
+	double * cPosePoint2 = cameraPoseT.ptr<double>(2);
+
+	//apply rotation
+	wPointP.x = wPointP.x * cPosePoint0[0] + wPointP.x * cPosePoint1[0] + wPointP.x * cPosePoint2[0];
+	wPointP.y = wPointP.y * cPosePoint0[1] + wPointP.y * cPosePoint1[1] + wPointP.y * cPosePoint2[1];
+	wPointP.z = wPointP.z * cPosePoint0[2] + wPointP.z * cPosePoint1[2] + wPointP.z * cPosePoint2[2];
+
+	//apply translation
+	wPointP.x += cPosePoint0[3];
+	wPointP.y += cPosePoint1[3];
+	wPointP.z += cPosePoint2[3];
+
+	//3dx * fx_d / depth + cx_d = x
+	p.x = wPointP.x * fx_d / wPointP.z + cx_d;
+	p.y = wPointP.y * fy_d / wPointP.z + cy_d;
+
+	return p;
 }
 
 //puts the projected point from pi into camera space
-cv::Mat GraphSLAMer::projectWorldPointToCameraPointU(cv::Mat cameraParamsK, cv::Mat cameraPoseT, cv::Mat wPointP)
+cv::Point3d GraphSLAMer::projectCameraPointToWorldPointP(cv::Mat & cameraParamsK, cv::Mat & cameraPoseT, cv::Point cPointU, double depth)
 {
-	cv::Mat pBar;
-	if (wPointP.rows == 3) pBar = makeHomo(wPointP);
-	else pBar = wPointP;
-	//3x3 * 4x4 * 3x1 ???????? How can you dehomogenize an SE3 element?
-	//DUH 3x3 * dehomo(4x4 * 4x1) = 3x3 * 3x1 = 3x1
-	cv::Mat notationalClarity = deHomo(cameraPoseT * pBar);
-	return pi(cameraParamsK * notationalClarity);
+	cv::Point3d pBar;
+	float cx_d = cameraParamsK.at<double>(0, 2);
+	float cy_d = cameraParamsK.at<double>(1, 2);
+	float fx_d = cameraParamsK.at<double>(0, 0);
+	float fy_d = cameraParamsK.at<double>(1, 1);
+
+	pBar.x = (cPointU.x - cx_d) * depth / fx_d;
+	pBar.y = (cPointU.y - cy_d) * depth / fy_d;
+	pBar.z = depth;
+
+	//apply reverse translation
+	pBar.x -= cameraPoseT.at<double>(0, 3);
+	pBar.y -= cameraPoseT.at<double>(1, 3);
+	pBar.z -= cameraPoseT.at<double>(2, 3);
+
+	//apply reverse rotation
+	pBar.x = pBar.x * cameraPoseT.at<double>(0, 0) + pBar.x * cameraPoseT.at<double>(0, 1) + pBar.x * cameraPoseT.at<double>(0, 2);
+	pBar.y = pBar.y * cameraPoseT.at<double>(1, 0) + pBar.y * cameraPoseT.at<double>(1, 1) + pBar.y * cameraPoseT.at<double>(1, 2);
+	pBar.z = pBar.z * cameraPoseT.at<double>(2, 0) + pBar.z * cameraPoseT.at<double>(2, 1) + pBar.z * cameraPoseT.at<double>(2, 2);
+
+	return pBar;
 }
 
 
@@ -315,25 +358,31 @@ cv::Mat GraphSLAMer::CalcErrorVec(std::vector<pPixel> pixels)
 }
 
 //pixel U is in fact an index
-double GraphSLAMer::calcPhotometricResidual(cv::Point2f pixelU, cv::Point2f projectedPoint, KeyFrame keyframe, cv::Mat imageT, double globalResidue)
+double GraphSLAMer::calcPhotometricResidual(double kfPixelSum, cv::Point2i projectedPoint, cv::Mat & imageT, double globalResidue)
 {
 	double r;//single pixel
-	r = cv::sum(keyframe.scaledImageI.at<Vec3b>(pixelU))[0] - cv::sum(imageT.at<Vec3b>(projectedPoint))[0] - globalResidue;
+	Vec3b *imagePixel = imageT.ptr<Vec3b>(projectedPoint.x);
+	r = kfPixelSum - imagePixel[0][0] + imagePixel[0][1] + imagePixel[0][2] - globalResidue;
 	return r;
 }
 
-void printMat(Mat a)
+void printMat(Mat &a)
 {
 	std::cout << a;
+	std::cout << std::endl;
 }
 
-void GraphSLAMer::ComputeMedianResidualAndCorrectedPhotometricResiduals(cv::Mat cameraParams, SE3 cameraPose, cv::Mat image, KeyFrame kf, std::vector<pPixel> & results, double & median)
+void GraphSLAMer::ComputeMedianResidualAndCorrectedPhotometricResiduals(cv::Mat & cameraParams, SE3 cameraPose, cv::Mat & image, KeyFrame kf, std::vector<pPixel> & results, double & median)
 {
 	// max heap to store the higher half elements 
 	std::priority_queue<double> max_heap_left;
 
 	// min heap to store the lower half elements
 	std::priority_queue<double, std::vector<double>, std::greater<double>> min_heap_right;
+
+	cv::Mat keyTrans;
+	cv::Mat camTrans;
+
 	for (int i = 0; i < image.rows; i++)
 	{
 		for (int j = 0; j < image.cols; j++)
@@ -343,17 +392,16 @@ void GraphSLAMer::ComputeMedianResidualAndCorrectedPhotometricResiduals(cv::Mat 
 			cv::Point pixelU = cv::Point(j, i);
 			double keyDepthAtU = kf.inverseDepthD.at<double>(pixelU);
 			//project into world space
-			//Mat lieMat = kf.cameraTransformationAndScaleS.getlieMatrix();
-			//Mat piInvMat = piInv(makeHomo(cv::Mat(pixelU)), keyDepthAtU);
-			cv::Mat p = kf.cameraTransformationAndScaleS.getlieMatrix() * makeHomo(cameraParamsInv * piInv(makeHomo(cv::Mat(pixelU)), keyDepthAtU));
-			float tx = p.at<double>(0, 0);
-			float ty = p.at<double>(1, 0);
-			float tz = p.at<double>(2, 0);
-			float tw = p.at<double>(3, 0);
+			keyTrans = kf.cameraTransformationAndScaleS.getlieMatrix();
+			cv::Point3d p = projectCameraPointToWorldPointP(cameraParams, keyTrans, cv::Point2i(pixelU), keyDepthAtU);
+			float tx = p.x;
+			float ty = p.y;
+			float tz = p.z;
 			//project into new image
-			cv::Point2f projectedPoint = cv::Point(projectWorldPointToCameraPointU(cameraParams, cameraPose.getlieMatrix(), p));
+			camTrans = cameraPose.getlieMatrix();
+			cv::Point2f projectedPoint = cv::Point(projectWorldPointToCameraPointU(cameraParams, camTrans, p));
 			//do a bounds check, continue if we are out of range
-			if (projectedPoint.x < 0 || projectedPoint.y < 0 || projectedPoint.x > image.rows || projectedPoint.y > image.cols) continue;
+			if (projectedPoint.x < 0 || projectedPoint.y < 0 || projectedPoint.x >= image.rows || projectedPoint.y >= image.cols) continue;
 			//set inital pixel
 			pPixel npixel;
 			npixel.keyframePixel = pixelU;
@@ -412,7 +460,7 @@ void GraphSLAMer::ComputeMedianResidualAndCorrectedPhotometricResiduals(cv::Mat 
 
 
 //computes the update
-cv::Mat GraphSLAMer::TransformJacobian(cv::Mat jacobian, cv::Mat residuals)
+cv::Mat GraphSLAMer::TransformJacobian(cv::Mat & jacobian, cv::Mat & residuals)
 {
 	cv::Mat JT = jacobian.t(); // JT
 	cv::Mat JTJ = JT * jacobian; // JT * J
@@ -424,7 +472,7 @@ cv::Mat GraphSLAMer::TransformJacobian(cv::Mat jacobian, cv::Mat residuals)
 }
 
 
-GraphSLAMer::SE3 GraphSLAMer::CalcGNPosOptimization(cv::Mat image, KeyFrame keyframe)
+GraphSLAMer::SE3 GraphSLAMer::CalcGNPosOptimization(cv::Mat & image, KeyFrame keyframe)
 {
 	//set initial camera pose
 	SE3 cameraPose = keyframe.cameraTransformationAndScaleS;
@@ -449,19 +497,15 @@ GraphSLAMer::SE3 GraphSLAMer::CalcGNPosOptimization(cv::Mat image, KeyFrame keyf
 		std::vector<pPixel> jacobianRes = ComputeJacobian(cameraParams, cameraPose, keyframe, image, rmean, image.cols * image.rows);
 
 		//place jacobians and residuals into cv::Matrices
-		cv::Mat jacobianMat(jacobianRes.size(), 16, CV_64FC1);
-		cv::Mat residualsMat(jacobianRes.size(), 1, CV_64FC1);
-		for (int i = 0; i < jacobianRes.size(); i++)
+		cv::Mat jacobianMat(1, 16, CV_64FC1);
+		cv::Mat residualErrorMat(1, 1, CV_64FC1);
+		residualErrorMat.at<double>(0, 0) = error;
+		for (int j = 0; j < 16; j++)
 		{
-			residualsMat.at<double>(i, 0) = residuals[i].residualSum;
-			residualSum += residuals[i].residualSum;
-			for (int j = 0; j < 16; j++)
-			{
-				jacobianMat.at<double>(i, j) = residuals[i].derivatives[j];
-			}
+			jacobianMat.at<double>(0, j) = jacobianRes[0].derivatives[j];
 		}
 		//calculate deltax from derivatives
-		cv::Mat deltaX = TransformJacobian(jacobianMat, residualsMat);
+		cv::Mat deltaX = TransformJacobian(jacobianMat, residualErrorMat);
 		//SolveSparsecv::Matrix(H + lambda, b);
 
 
@@ -677,7 +721,7 @@ void GraphSLAMer::ComputeQuadtreeForKeyframe(KeyFrame &kf)
 }
 
 //calculates the depths by comparing the image, after plcement into a power of 2 pyramid, against the keyframe quadtree leaves
-void GraphSLAMer::computeDepthsFromStereoPair(KeyFrame kf, cv::Mat image, cv::Mat cameraParams, SE3 cameraPos)
+void GraphSLAMer::computeDepthsFromStereoPair(KeyFrame kf, cv::Mat & image, cv::Mat & cameraParams, SE3 cameraPos)
 {
 	int prows = image.rows;
 	int pcols = image.cols;
@@ -1159,11 +1203,6 @@ void GraphSLAMer::Initialize_LS_Graph_SLAM(cv::Mat cameraFrame)
 std::vector<cv::Point3d> GraphSLAMer::get3dPoints()
 {
 	std::vector<cv::Point3d> pcloud_est;
-	//extract some important values from our camera matrix
-	float cx_d = cameraParams.at<double>(0, 2);
-	float cy_d = cameraParams.at<double>(1, 2);
-	float fx_d = cameraParams.at<double>(0, 0);
-	float fy_d = cameraParams.at<double>(1, 1);
 
 	//cycle through the depth maps, converting the depths into points using the camera position
 	for (int kfi = 0; kfi < keyframes.V.size(); kfi++)
@@ -1173,10 +1212,8 @@ std::vector<cv::Point3d> GraphSLAMer::get3dPoints()
 		{
 			for (int py = 0; py < depths.cols; py++)
 			{
-				float x = (px - cx_d) * depths.at<double>(px, py) / fx_d;//(x_d - cx_d) * depth(x_d, y_d) / fx_d;
-				float y = (py - cy_d) * depths.at<double>(px, py) / fy_d;
-				float z = depths.at<double>(px, py);
-				pcloud_est.push_back(cv::Vec3d(x, y, z));
+				Point3d tpoint = projectCameraPointToWorldPointP(cameraParams, keyframes.E[kfi], Point(px, py), depths.at<double>(px, py));
+				pcloud_est.push_back(tpoint);
 			}
 		}
 	}
