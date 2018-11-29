@@ -33,6 +33,20 @@ public:
 
 		SE3()
 		{
+			//create proper size matrices at origin
+			translation = cv::Mat::zeros(1, 3, CV_64FC1);
+			rotation = cv::Mat::zeros(3, 3, CV_64FC1);
+
+			lieMat = cv::Mat::zeros(4, 4, CV_64FC1);
+			//set rotation
+			for (int x = 0; x < 3; x++)
+				for (int y = 0; y < 3; y++)
+					lieMat.at<double>(x, y) = rotation.at<double>(x, y);
+			//set translation
+			for (int i = 0; i < 3; i++)
+				lieMat.at<double>(3, i) = translation.at<double>(0, i);
+
+			lieMat.at<double>(3, 3) = 1;
 		}
 
 		SE3(cv::Mat _rotation, cv::Mat _translation)
@@ -40,7 +54,7 @@ public:
 			rotation = _rotation;
 			translation = _translation;
 
-			cv::Mat lieMat = cv::Mat(4, 4, CV_64FC1);
+			lieMat = cv::Mat::zeros(4, 4, CV_64FC1);
 			//set rotation
 			for (int x = 0; x < 3; x++)
 				for (int y = 0; y < 3; y++)
@@ -73,7 +87,7 @@ public:
 		void addLie(cv::Mat lieAdd)
 		{
 			for (int x = 0; x < 3; x++)
-				for (int y = 0; y < 4; y++)
+				for (int y = 0; y < 3; y++)
 				{
 					lieMat.at<double>(x, y) += lieAdd.at<double>(x, y);
 					rotation.at<double>(x, y) += lieAdd.at<double>(x, y);
@@ -93,13 +107,22 @@ public:
 		//constructs and returns the lie matrix
 		cv::Mat getlieMatrix()
 		{
+			//std::cout << lieMat;
 			return lieMat;
 		}
 
-		//calculatres the 3x3 extrinsic matrix
+		//calculatres the 3x4 extrinsic matrix
 		cv::Mat getExtrinsicMatrix()
 		{
-			return rotation * translation;
+			cv::Mat eMat = cv::Mat::zeros(3, 4, CV_64FC1);
+			
+			for (int x = 0; x < 3; x++)
+				for (int y = 0; y < 4; y++)
+				{
+					eMat.at<double>(x, y) = lieMat.at<double>(x, y);
+				}
+
+			return eMat;
 		}
 	};
 
@@ -187,7 +210,7 @@ public:
 	double CalcErrorVal(std::vector<pPixel> residuals);
 
 
-	double derivative(cv::Mat cameraPose, cv::Point2f pixelU, cv::Point2f projectedPoint, KeyFrame keyframe, cv::Mat image, double rmean, int bIndexX, int bIndexY);
+	double derivative(cv::Mat cameraPose, cv::Mat worldPointP, cv::Point2f pixelU, KeyFrame keyframe, cv::Mat image, double rmean, int bIndexX, int bIndexY);
 
 	std::vector<pPixel> ComputeJacobian(cv::Mat cameraParams, SE3 cameraPose, KeyFrame keyframe, cv::Mat image, double rmean, int numRes);
 
@@ -203,7 +226,7 @@ public:
 	cv::Mat piInv(cv::Mat input, double invDepth);
 
 	//puts the projected point from pi into camera space
-	cv::Mat projectWorldPointToCameraPointU(cv::Mat cameraParamsK, SE3 cameraPoseT, cv::Mat wPointP);
+	cv::Mat projectWorldPointToCameraPointU(cv::Mat cameraParamsK, cv::Mat cameraPoseT, cv::Mat wPointP);
 
 
 	double HuberNorm(double x, double epsilon);
@@ -240,5 +263,5 @@ public:
 	void Initialize_LS_Graph_SLAM(cv::Mat cameraFrame);
 
 	//passes over keyframes and constraints and returns a list of points
-	cv::Mat get3dPoints();
+	std::vector<cv::Point3d> get3dPoints();
 };

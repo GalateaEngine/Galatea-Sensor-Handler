@@ -41,7 +41,8 @@ public:
 	map<int, TCA_Object> objectMap;
 	set<cv::Point2f> pSet;
 	cv::viz::Viz3d viewer;
-	cv::Mat pCloud;
+	bool widgetSet = false;
+	std::vector<Point3d> pCloud;
 	cv::Mat colours;
 	cv::Mat lastFrame;
 
