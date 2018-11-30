@@ -19,12 +19,26 @@ TCA_Video::TCA_Video()
 	{
 		Mat frame;
 		cap >> frame;
+		frame.convertTo(frame, CV_64FC3, 1.f / 255);
 		gs.Initialize_LS_Graph_SLAM(frame);
 		viewer = cv::viz::Viz3d("Point Cloud");
 	}
 	cv::namedWindow("VideoFeed1");
 	cv::namedWindow("VideoFeed2");
 	cv::namedWindow("VideoFeed3");
+}
+
+void TCA_Video::keyboardCallback(const cv::viz::KeyboardEvent& event, void* cookie)
+{
+	// Exit Viewer when Pressed ESC key
+	//0x1B = VK_ESCAPE
+	if (event.code == 0x1B && event.action == cv::viz::KeyboardEvent::Action::KEY_DOWN) {
+		// Retrieve Viewer
+		cv::viz::Viz3d viewer = static_cast<TCA_Video*>(cookie)->viewer;
+
+		// Close Viewer
+		viewer.close();
+	}
 }
 
 TCA_Video::~TCA_Video()
@@ -174,6 +188,7 @@ bool TCA_Video::update()
 
 		cv::Mat frame;
 		cap >> frame;
+		frame.convertTo(frame, CV_64FC3, 1.f / 255);
 		imshow("VideoFeed1", frame);
 		if (frame.empty())
 		{
@@ -212,16 +227,23 @@ bool TCA_Video::update()
 			GraphSLAMer::SE3 location = gs.LS_Graph_SLAM(frame);
 
 			//get back current list of 3d points
+			//pCloud.clear();
+			//pColours.clear();
 			pCloud = gs.get3dPoints();
-			
-			if (!widgetSet)
+			pColours = gs.get3dColours();
+			if (pCloud.size() > 0)
 			{
-				widgetSet = true;
-				viz::WCloud cloud_widget = viz::WCloud(pCloud, viz::Color::green());
-				viewer.showWidget("Point Cloud", cloud_widget);
-				viewer.spinOnce();
+				if (!widgetSet)
+				{
+					widgetSet = true;
+					viz::WCloud cloud_widget(pCloud, pColours);
+					viewer.showWidget("Point Cloud", cloud_widget);
+				}
 			}
-			
+			viewer.spinOnce();
+			//viewer.removeAllWidgets();
+			//std::this_thread::sleep_for(std::chrono::milliseconds(10));
+			cv::waitKey(10000);
 		}
 		return true;
 	}

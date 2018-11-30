@@ -43,6 +43,7 @@ public:
 	cv::viz::Viz3d viewer;
 	bool widgetSet = false;
 	std::vector<Point3d> pCloud;
+	std::vector<Vec3b> pColours;
 	cv::Mat colours;
 	cv::Mat lastFrame;
 
@@ -70,6 +71,8 @@ public:
 	bool processFrameData(cv::Mat data);
 
 	bool update();
+
+	void keyboardCallback(const cv::viz::KeyboardEvent& event, void* cookie);
 
 };
 

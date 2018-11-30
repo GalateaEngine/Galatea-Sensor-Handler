@@ -37,16 +37,16 @@ public:
 			translation = cv::Mat::zeros(1, 3, CV_64FC1);
 			rotation = cv::Mat::eye(3, 3, CV_64FC1);
 
-			lieMat = cv::Mat::zeros(4, 4, CV_64FC1);
+			lieMat = cv::Mat::zeros(3, 4, CV_64FC1);
 			//set rotation
 			for (int x = 0; x < 3; x++)
 				for (int y = 0; y < 3; y++)
 					lieMat.at<double>(x, y) = rotation.at<double>(x, y);
 			//set translation
 			for (int i = 0; i < 3; i++)
-				lieMat.at<double>(3, i) = translation.at<double>(0, i);
+				lieMat.at<double>(i, 3) = translation.at<double>(0, i);
 
-			lieMat.at<double>(3, 3) = 1;
+			//lieMat.at<double>(3, 3) = 1;
 		}
 
 		SE3(cv::Mat _rotation, cv::Mat _translation)
@@ -54,16 +54,16 @@ public:
 			rotation = _rotation;
 			translation = _translation;
 
-			lieMat = cv::Mat::zeros(4, 4, CV_64FC1);
+			lieMat = cv::Mat::zeros(3, 4, CV_64FC1);
 			//set rotation
 			for (int x = 0; x < 3; x++)
 				for (int y = 0; y < 3; y++)
 					lieMat.at<double>(x, y) = rotation.at<double>(x, y);
 			//set translation
 			for (int i = 0; i < 3; i++)
-				lieMat.at<double>(3, i) = translation.at<double>(0, i);
+				lieMat.at<double>(i, 3) = translation.at<double>(0, i);
 
-			lieMat.at<double>(3, 3) = 1;
+			//lieMat.at<double>(3, 3) = 1;
 		}
 
 		void addRotation(cv::Mat rotationAdd)
@@ -74,24 +74,32 @@ public:
 					lieMat.at<double>(x, y) += rotationAdd.at<double>(x, y);
 					rotation.at<double>(x, y) += rotationAdd.at<double>(x, y);
 				}
+
 		}
 
 		void addTranslation(cv::Mat translationAdd)
 		{
 			for (int i = 0; i < 3; i++)
 			{
-				lieMat.at<double>(3, i) = translationAdd.at<double>(0, i);
+				lieMat.at<double>(i, 3) = translationAdd.at<double>(0, i);
 			}
 		}
 
 		void addLie(cv::Mat lieAdd)
 		{
 			for (int x = 0; x < 3; x++)
-				for (int y = 0; y < 3; y++)
+				for (int y = 0; y < 4; y++)
 				{
 					lieMat.at<double>(x, y) += lieAdd.at<double>(x, y);
-					rotation.at<double>(x, y) += lieAdd.at<double>(x, y);
 				}
+			//set rotation
+			for (int x = 0; x < 3; x++)
+				for (int y = 0; y < 3; y++)
+					rotation.at<double>(x, y) = lieMat.at<double>(x, y);
+			//set translation
+			for (int i = 0; i < 3; i++)
+				translation.at<double>(0, i) = lieMat.at<double>(i, 3);
+
 		}
 
 		cv::Mat getRotation()
@@ -164,7 +172,7 @@ public:
 	public:
 		pPixel()
 		{
-			for (int i = 0; i < 16; i++)
+			for (int i = 0; i < 12; i++)
 			{
 				derivatives[i] = 0.0;
 			}
@@ -177,7 +185,7 @@ public:
 		double keyframeIntensity;
 		double imageIntensity;
 		//16 is for the number of numbers in a sim(3) var
-		double derivatives[16];
+		double derivatives[12];
 	};
 
 	class PoseGraph
@@ -270,4 +278,5 @@ public:
 
 	//passes over keyframes and constraints and returns a list of points
 	std::vector<cv::Point3d> get3dPoints();
+	std::vector<cv::Vec3b> get3dColours();
 };

@@ -136,29 +136,34 @@ cv::Mat GraphSLAMer::SolveSparseMatrix(cv::Mat H, cv::Mat b)
 
 double GraphSLAMer::CalcErrorVal(std::vector<pPixel> residuals)
 {
+	if (residuals.size() < 300) //too few pixels to test
+	{
+		return 1e+300;
+	}
 	double error = 0;
 	for (int i = 0; i < residuals.size(); i++)
 	{
 		error += residuals[i].residualSum * residuals[i].residualSum;
 	}
-	return error;
+	return error / residuals.size();
 }
 
 
 double GraphSLAMer::derivative(cv::Mat & cameraPose, cv::Point3d worldPointP, double pixelSum, double kfPixelVariance, cv::Mat & image, double rmean, int bIndexX, int bIndexY) //b is our guessed position, x a given pixel
 {
-	double alpha = 1e-7;
+	double alpha = 0.00001;
 	cameraPose.at<double>(bIndexX, bIndexY) += alpha;
 	cv::Point projectedPoint = projectWorldPointToCameraPointU(cameraParams, cameraPose, worldPointP);
-	//do a bounds check, return 0 if its out of range (wait, we need a continuous function???)
-	if (projectedPoint.x < 0 || projectedPoint.y < 0 || projectedPoint.x >= image.rows || projectedPoint.y >= image.cols) return 0;
-	double y1 = findY(pixelSum, kfPixelVariance, projectedPoint, image, rmean);
-	cameraPose.at<double>(bIndexX, bIndexY) -= (alpha * 2);
+	cameraPose.at<double>(bIndexX, bIndexY) -= alpha;
+	//do a bounds check, leave 0 if its out of range (wait, we need a continuous function???)
+	double y1 = 0.0;
+	if (projectedPoint.x >= 0 && projectedPoint.y >= 0 && projectedPoint.x < image.rows && projectedPoint.y < image.cols) y1 = findY(pixelSum, kfPixelVariance, projectedPoint, image, rmean);
+	cameraPose.at<double>(bIndexX, bIndexY) -= alpha;
 	projectedPoint = cv::Point(projectWorldPointToCameraPointU(cameraParams, cameraPose, worldPointP));
-	//do a bounds check, return 0 if its out of range (wait, we need a continuous function???)
-	if (projectedPoint.x < 0 || projectedPoint.y < 0 || projectedPoint.x >= image.rows || projectedPoint.y >= image.cols) return 0;
-	double y2 = findY(pixelSum, kfPixelVariance, projectedPoint, image, rmean);
 	cameraPose.at<double>(bIndexX, bIndexY) += alpha;
+	//do a bounds check, leave 0 if its out of range (wait, we need a continuous function???)
+	double y2 = 0.0;
+	if (projectedPoint.x >= 0 && projectedPoint.y >= 0 && projectedPoint.x < image.rows && projectedPoint.y < image.cols) y2 = findY(pixelSum, kfPixelVariance, projectedPoint, image, rmean);
 	return (y1 - y2) / (2 * alpha);
 }
 
@@ -187,17 +192,22 @@ std::vector<GraphSLAMer::pPixel> GraphSLAMer::ComputeJacobian(cv::Mat & cameraPa
 			if (projectedPoint.x < 0 || projectedPoint.y < 0 || projectedPoint.x >= image.rows || projectedPoint.y >= image.cols) continue;
 
 			//store our image strength at pixelu and its variance
-			double kfPixelSum = keyframe.scaledImageI.at<Vec3b>(pixelU)[0] + keyframe.scaledImageI.at<Vec3b>(pixelU)[1] + keyframe.scaledImageI.at<Vec3b>(pixelU)[2];
+			double kfPixelSum = keyframe.scaledImageI.at<Vec3d>(pixelU)[0] + keyframe.scaledImageI.at<Vec3d>(pixelU)[1] + keyframe.scaledImageI.at<Vec3d>(pixelU)[2];
 			double kfPixelVariance = keyframe.inverseDepthVarianceV.at<double>(pixelU);
 
 			//for the sim(3) vars
 			cv::Mat camMat = cameraPose.getlieMatrix();
-			for (int i = 0; i < camMat.rows; i++)
+			for (int i = 0; i < 3; i++)
 			{
-				for (int j = 0; j < camMat.cols; j++)
+				for (int j = 0; j < 4; j++)
 				{
 					//compute this section of the jacobian and store for jacobian compilation
 					//jc.at<double>((x * image.rows) + y, (i * b.rows) + j) = derivative(cameraParams, b, pixelU, projectedPoint, keyframe, image, rmean, i, j);
+					double val = derivative(camMat, p, kfPixelSum, kfPixelVariance, image, rmean, i, j);
+					if (isnan(val))
+					{
+						std::cout << p << std::endl;
+					}
 					jacobianResults.derivatives[(i * camMat.cols) + j] += derivative(camMat, p, kfPixelSum, kfPixelVariance, image, rmean, i, j);
 				}
 			}
@@ -230,10 +240,13 @@ std::vector<GraphSLAMer::pPixel> GraphSLAMer::ComputeResiduals(cv::Mat & cameraP
 			camTrans = cameraPose.getlieMatrix();
 			cv::Point projectedPoint = projectWorldPointToCameraPointU(cameraParams, camTrans, p);
 			//do a bounds check, continue if we are out of range
-			if (projectedPoint.x < 0 || projectedPoint.y < 0 || projectedPoint.x > image.rows || projectedPoint.y > image.cols) continue;
+			if (projectedPoint.x < 0 || projectedPoint.y < 0 || projectedPoint.x >= image.rows || projectedPoint.y >= image.cols) continue;
 
 			//store our image strength at pixelu and its variance
-			double kfPixelSum = keyframe.scaledImageI.at<Point3i>(pixelU).x + keyframe.scaledImageI.at<Point3i>(pixelU).y + keyframe.scaledImageI.at<Point3i>(pixelU).z;
+			double kfPixelSum = 0.0;
+
+			kfPixelSum = keyframe.scaledImageI.at<Vec3d>(pixelU)[0] + keyframe.scaledImageI.at<Vec3d>(pixelU)[1] + keyframe.scaledImageI.at<Vec3d>(pixelU)[2];
+
 			double kfPixelVariance = keyframe.inverseDepthVarianceV.at<double>(pixelU);
 
 			//set inital pixel
@@ -242,9 +255,9 @@ std::vector<GraphSLAMer::pPixel> GraphSLAMer::ComputeResiduals(cv::Mat & cameraP
 			npixel.imagePixel = projectedPoint;
 			npixel.worldPoint = p;
 			npixel.depth = keyframe.inverseDepthD.at<double>(pixelU);;
-			npixel.keyframeIntensity = cv::sum(keyframe.scaledImageI.at<Vec3b>(pixelU))[0];
+			npixel.keyframeIntensity = cv::sum(keyframe.scaledImageI.at<Vec3d>(pixelU))[0];
 			npixel.residualSum = findY(kfPixelSum, kfPixelVariance, projectedPoint, image, rmean);
-			results.push_back(pPixel());
+			results.push_back(npixel);
 		}
 	}
 	return results;
@@ -361,7 +374,7 @@ cv::Mat GraphSLAMer::CalcErrorVec(std::vector<pPixel> pixels)
 double GraphSLAMer::calcPhotometricResidual(double kfPixelSum, cv::Point2i projectedPoint, cv::Mat & imageT, double globalResidue)
 {
 	double r;//single pixel
-	Vec3b *imagePixel = imageT.ptr<Vec3b>(projectedPoint.x);
+	Vec3d *imagePixel = imageT.ptr<Vec3d>(projectedPoint.x);
 	r = kfPixelSum - imagePixel[0][0] + imagePixel[0][1] + imagePixel[0][2] - globalResidue;
 	return r;
 }
@@ -408,9 +421,9 @@ void GraphSLAMer::ComputeMedianResidualAndCorrectedPhotometricResiduals(cv::Mat 
 			npixel.imagePixel = projectedPoint;
 			npixel.worldPoint = p;
 			npixel.depth = kf.inverseDepthD.at<double>(pixelU);;
-			npixel.keyframeIntensity = cv::sum(kf.scaledImageI.at<Vec3b>(pixelU))[0];
-			npixel.residualSum = cv::sum(kf.scaledImageI.at<Vec3b>(pixelU))[0] - cv::sum(image.at<Vec3b>(projectedPoint))[0];
-			results.push_back(pPixel());
+			npixel.keyframeIntensity = cv::sum(kf.scaledImageI.at<Vec3d>(pixelU))[0];
+			npixel.residualSum = cv::sum(kf.scaledImageI.at<Vec3d>(pixelU))[0] - cv::sum(image.at<Vec3d>(projectedPoint))[0];
+			results.push_back(npixel);
 			double x = npixel.residualSum;
 			// case1(left side heap has more elements)
 			if (max_heap_left.size() > min_heap_right.size())
@@ -464,9 +477,9 @@ cv::Mat GraphSLAMer::TransformJacobian(cv::Mat & jacobian, cv::Mat & residuals)
 {
 	cv::Mat JT = jacobian.t(); // JT
 	cv::Mat JTJ = JT * jacobian; // JT * J
-	cv::Mat l = MatrixSqrt(JTJ);
-	InvertLowerTriangluar(l);
-	cv::Mat JTJi = l.t() * l; // (JT * J)^-1
+	//cv::Mat l = MatrixSqrt(JTJ);
+	//InvertLowerTriangluar(l);
+	cv::Mat JTJi = JTJ.inv(); // (JT * J)^-1
 	cv::Mat JTJiJT = JTJi * JT; // (JT * J)^-1 * JT
 	return JTJiJT * residuals; // (JT * J)^-1 * JT * r
 }
@@ -480,8 +493,8 @@ GraphSLAMer::SE3 GraphSLAMer::CalcGNPosOptimization(cv::Mat & image, KeyFrame ke
 	//run gauss-newton optimization
 	double residualSum = 0.0;
 	double oldResidual = 1.0;
-	double lambda = 1.0;
-	while (fabs(residualSum - oldResidual) > 0)//while we have not converged
+	double lambda = 0.01;
+	while (!(fabs(oldResidual - residualSum) == 0))//while we have not converged
 	{
 		oldResidual = residualSum;
 
@@ -491,47 +504,48 @@ GraphSLAMer::SE3 GraphSLAMer::CalcGNPosOptimization(cv::Mat & image, KeyFrame ke
 		ComputeMedianResidualAndCorrectedPhotometricResiduals(cameraParams, cameraPose, image, keyframe, residuals, rmean);
 		//calculate error with current residuals
 		//cv::Mat errorVec = CalcErrorVec(residuals);
-		double error = CalcErrorVal(residuals);
-
+		double error = CalcErrorVal(ComputeResiduals(cameraParams, cameraPose, keyframe, image, rmean));
+		residualSum = error;
 		//update pose estimate
 		std::vector<pPixel> jacobianRes = ComputeJacobian(cameraParams, cameraPose, keyframe, image, rmean, image.cols * image.rows);
 
 		//place jacobians and residuals into cv::Matrices
-		cv::Mat jacobianMat(1, 16, CV_64FC1);
+		cv::Mat jacobianMat(1, 12, CV_64FC1);
 		cv::Mat residualErrorMat(1, 1, CV_64FC1);
 		residualErrorMat.at<double>(0, 0) = error;
-		for (int j = 0; j < 16; j++)
+		for (int j = 0; j < 12; j++)
 		{
 			jacobianMat.at<double>(0, j) = jacobianRes[0].derivatives[j];
 		}
 		//calculate deltax from derivatives
-		cv::Mat deltaX = TransformJacobian(jacobianMat, residualErrorMat);
+		//cv::Mat deltaX = TransformJacobian(jacobianMat, residualErrorMat);
 		//SolveSparsecv::Matrix(H + lambda, b);
 
 
 		//store position
 		SE3 camOld = cameraPose;
-		cv::Mat deltaMat(4, 4, CV_64FC1);
+		cv::Mat deltaMat(3, 4, CV_64FC1);
 		//increment camera pose
 		//for the sim(3) vars
-		for (int i = 0; i < 4; i++)
+		for (int i = 0; i < 3; i++)
 		{
 			for (int j = 0; j < 4; j++)
 			{
-				deltaMat.at<double>(i, j) += deltaX.at<double>((i * 4) + j) * lambda;
+				deltaMat.at<double>(i, j) = jacobianMat.at<double>((i * 4) + j) * lambda;
 			}
 		}
 		cameraPose.addLie(deltaMat);
 		//compute new residuals
 		std::vector<pPixel> nresiduals = ComputeResiduals(cameraParams, cameraPose, keyframe, image, rmean);
-		if (error < CalcErrorVal(nresiduals))
+		double newError = CalcErrorVal(nresiduals);
+		if (error <= newError)
 		{
 			cameraPose = camOld;
-			lambda *= 2;
+			lambda /= 2;
 		}
 		else
 		{
-			lambda /= 2;
+			lambda *= 2;
 		}
 
 	}
@@ -553,7 +567,7 @@ void GraphSLAMer::ComputeQuadtreeForKeyframe(KeyFrame &kf)
 		tpixels /= 4;
 		treeSize += tpixels;
 	}
-	int index = treeSize - numPixles;
+	int index = 0;//treeSize - numPixles;
 	std::vector<QuadTreeNode> nodes(treeSize);
 
 	//place image into quadtree
@@ -568,21 +582,21 @@ void GraphSLAMer::ComputeQuadtreeForKeyframe(KeyFrame &kf)
 					QuadTreeNode leaf;
 					leaf.numChildren = 0;
 					leaf.strikes = 0;
-					leaf.avgIntensity = cv::sum(image.at<Vec3b>(x + i, y + j))[0];
+					leaf.avgIntensity = cv::sum(image.at<Vec3d>(x + i, y + j))[0];
 
 					//calculate and store gradient
 					double x1, x2, y1, y2;
 					//bounds check gradiant, use current value if tripped
-					if (x + i - 1 > 0) x1 = cv::sum(image.at<Vec3b>(x + i - 1, y + j))[0];
+					if (x + i - 1 > 0) x1 = cv::sum(image.at<Vec3d>(x + i - 1, y + j))[0];
 					else x1 = leaf.avgIntensity;
 
-					if (x + i + 1 < image.rows) x2 = cv::sum(image.at<Vec3b>(x + i + 1, y + j))[0];
+					if (x + i + 1 < image.rows) x2 = cv::sum(image.at<Vec3d>(x + i + 1, y + j))[0];
 					else x2 = leaf.avgIntensity;
 
-					if (y + j - 1 > 0) y1 = cv::sum(image.at<Vec3b>(x + i, y + j - 1))[0];
+					if (y + j - 1 > 0) y1 = cv::sum(image.at<Vec3d>(x + i, y + j - 1))[0];
 					else y1 = leaf.avgIntensity;
 
-					if (y + j + 1 < image.cols) y2 = cv::sum(image.at<Vec3b>(x + i, y + j + 1))[0];
+					if (y + j + 1 < image.cols) y2 = cv::sum(image.at<Vec3d>(x + i, y + j + 1))[0];
 					else y2 = leaf.avgIntensity;
 
 					leaf.xGradient = x1 - x2;
@@ -645,7 +659,7 @@ void GraphSLAMer::ComputeQuadtreeForKeyframe(KeyFrame &kf)
 							}
 
 						}
-						branch.avgIntensity /= 4;
+						branch.avgIntensity = avgIntensity / 4;
 						branch.layer = l + 1;
 						branch.strikes = 0;
 						//this is an approximation and WRONG, in fact we should be using max found instead of avg
@@ -726,7 +740,7 @@ void GraphSLAMer::computeDepthsFromStereoPair(KeyFrame kf, cv::Mat & image, cv::
 	int prows = image.rows;
 	int pcols = image.cols;
 	std::vector<cv::Mat> pyramid;
-	cv::Mat lastImage = image;
+	cv::Mat lastImage = image.clone();
 
 	//create power pyramid
 	for (int i = 0; i < quadTreeDepth; i++)
@@ -747,7 +761,7 @@ void GraphSLAMer::computeDepthsFromStereoPair(KeyFrame kf, cv::Mat & image, cv::
 						else if (lastImage.type() == 6)
 							avg += lastImage.at<double>(x + j, y + k);
 						else if (lastImage.type() == 16)
-							avg += cv::sum(lastImage.at<Vec3b>(x + j, y + k))[0];
+							avg += cv::sum(lastImage.at<Vec3d>(x + j, y + k))[0];
 					}
 				}
 				pimage.at<double>(x / 2, y / 2) += avg / 4.0;
@@ -801,7 +815,7 @@ void GraphSLAMer::computeDepthsFromStereoPair(KeyFrame kf, cv::Mat & image, cv::
 		QuadTreeNode leaf = kf.quadTreeLeaves[i];
 
 		//skip if the node is invalid
-		if (leaf.valid) continue;
+		if (!leaf.valid) continue;
 
 		//store the value we will be comparing against
 		double kValue = leaf.avgIntensity;
@@ -815,16 +829,16 @@ void GraphSLAMer::computeDepthsFromStereoPair(KeyFrame kf, cv::Mat & image, cv::
 		//int x = floor(e.at<double>(0, 0));
 
 		//calculate line equation
-		cv::Mat position(1, 3, CV_64FC1);
+		cv::Mat position(3, 1, CV_64FC1);
 		position.at<double>(0, 0) = leaf.position.x;
-		position.at<double>(0, 1) = leaf.position.y;
-		position.at<double>(0, 2) = 1;
+		position.at<double>(1, 0) = leaf.position.y;
+		position.at<double>(2, 0) = 1;
 		cv::Mat lineParams = F * position;
 
 		//store contant values for epipolar line
 		double xC = lineParams.at<double>(0, 0);
-		double yC = lineParams.at<double>(0, 1);
-		double C = lineParams.at<double>(0, 2);
+		double yC = lineParams.at<double>(1, 0);
+		double C = lineParams.at<double>(2, 0);
 
 		//values for storing our max and pixel position
 		cv::Point2f bestPos;
@@ -1127,23 +1141,24 @@ GraphSLAMer::SE3 GraphSLAMer::LS_Graph_SLAM(cv::Mat cameraFrame)
 	//find most likley position of camera based on last keyframe
 	SE3 position = CalcGNPosOptimization(cameraFrame, lastKey);
 
-	//construct depth quadtrees based on the stereo pairs
-	computeDepthsFromStereoPair(lastKey, cameraFrame, cameraParams, position);
+	//make new keyframe only if current and keyframe position are different
+	makeNewKeyframe = !cv::countNonZero((lastKey.cameraTransformationAndScaleS.getlieMatrix() != position.getlieMatrix()) == 0);
 
-	//convert the nodes into a pixel map
-	projectDepthNodesToDepthMap(lastKey);
-
-	//run makenewkeyframe check against image quality
-	makeNewKeyframe = true;
 	if (makeNewKeyframe)
 	{
+		//construct depth quadtrees based on the stereo pairs
+		computeDepthsFromStereoPair(lastKey, cameraFrame, cameraParams, position);
+
+		//convert the nodes into a pixel map
+		projectDepthNodesToDepthMap(lastKey);
+
 		keyframes.E.push_back(position.getlieMatrix());
 		keyframes.V.push_back(lastKey);
 
 		KeyFrame newKey;
 
 		//add image te new  keyframe
-		newKey.scaledImageI = cameraFrame;
+		newKey.scaledImageI = cameraFrame.clone();
 
 		//set invDepth and variance to one (need to initialize this better)
 		newKey.inverseDepthD = cv::Mat::ones(cameraFrame.rows, cameraFrame.cols, CV_64FC1);
@@ -1176,7 +1191,7 @@ void GraphSLAMer::Initialize_LS_Graph_SLAM(cv::Mat cameraFrame)
 	//set position to 0,0,0
 
 	//add image te new  keyframe
-	newKey.scaledImageI = cameraFrame;
+	newKey.scaledImageI = cameraFrame.clone();
 
 	//computes the power tree for the image, allowing for fast analysis 
 	ComputeQuadtreeForKeyframe(newKey);
@@ -1212,11 +1227,31 @@ std::vector<cv::Point3d> GraphSLAMer::get3dPoints()
 		{
 			for (int py = 0; py < depths.cols; py++)
 			{
-				Point3d tpoint = projectCameraPointToWorldPointP(cameraParams, keyframes.E[kfi], Point(px, py), depths.at<double>(px, py));
+				Point3d tpoint = projectCameraPointToWorldPointP(cameraParams, keyframes.E[kfi], Point(py, px), depths.at<double>(px, py));
 				pcloud_est.push_back(tpoint);
 			}
 		}
 	}
 
+	return pcloud_est;
+}
+
+std::vector<cv::Vec3b> GraphSLAMer::get3dColours()
+{
+	std::vector<cv::Vec3b> pcloud_est;
+
+	//cycle through the depth maps, converting the depths into points using the camera position
+	for (int kfi = 0; kfi < keyframes.V.size(); kfi++)
+	{
+		cv::Mat depths = 1.0 / keyframes.V[kfi].inverseDepthD;
+		for (int px = 0; px < depths.rows; px++)
+		{
+			for (int py = 0; py < depths.cols; py++)
+			{
+				Vec3b tpoint = keyframes.V[kfi].scaledImageI.at<Vec3d>(px, py);
+				pcloud_est.push_back(tpoint);
+			}
+		}
+	}
 	return pcloud_est;
 }
