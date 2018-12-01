@@ -19,10 +19,14 @@ TCA_Video::TCA_Video()
 	bool useGraphSLAM = true;
 	if (useGraphSLAM)
 	{
-		Mat frame;
+		Mat frame, frame2;
 		cap >> frame;
+		std::cout << "reposition camera then hit enter" << std::endl;
+		std::cin.get();
+		cap >> frame2;
 		frame.convertTo(frame, CV_64FC3, 1.f / 255);
-		gs.Initialize_LS_Graph_SLAM(frame);
+		frame2.convertTo(frame2, CV_64FC3, 1.f / 255);
+		gs.Initialize_LS_Graph_SLAM(frame, frame2);
 		viewer = cv::viz::Viz3d("Point Cloud");
 	}
 	cv::namedWindow("VideoFeed1");
@@ -233,7 +237,7 @@ bool TCA_Video::update()
 			//pColours.clear();
 			pCloud = gs.get3dPoints();
 			pColours = gs.get3dColours();
-			if (pCloud.size() > 0)
+			if (pCloud.size() > 0 && widgetCount > 5)
 			{
 				if (!widgetSet)
 				{
@@ -242,7 +246,10 @@ bool TCA_Video::update()
 					viewer.showWidget("Point Cloud", cloud_widget);
 				}
 			}
+			widgetCount++;
 			viewer.spinOnce();
+			cv::Affine3d pose(location.getRotationMat(), location.getTranslation());
+			viewer.setViewerPose(pose);
 			//viewer.removeAllWidgets();
 			//std::this_thread::sleep_for(std::chrono::milliseconds(10));
 		}

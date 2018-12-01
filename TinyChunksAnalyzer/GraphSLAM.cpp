@@ -130,19 +130,13 @@ double GraphSLAMer::CalcErrorVal(double residuals)
 
 double GraphSLAMer::derivative(SE3 & cameraPose, KeyFrame & keyframe, cv::Mat & image, double rmean, int bIndexX) //b is our guessed position, x a given pixel
 {
-	double alpha = 0.001;
+	double alpha = 0.01;
 	double y1 = 0;
 	double y2 = 0;
 	Mat nCamPose;
 	Mat nParams = cameraPose.getParameters();
 	double * paraIndex = &nParams.ptr<double>(0)[bIndexX];
-	while (y1 == y2)
-	{
-		alpha *= 10;
-		if (alpha > 100)
-		{
-			alpha = 0.1;
-		}
+
 		paraIndex[0] += alpha;
 		cameraPose.setParameters(nParams);
 		nCamPose = cameraPose.getlieMatrix();
@@ -153,7 +147,7 @@ double GraphSLAMer::derivative(SE3 & cameraPose, KeyFrame & keyframe, cv::Mat & 
 		y2 = ComputeResiduals(nCamPose, keyframe, image, true, rmean);
 		paraIndex[0] += alpha;
 		cameraPose.setParameters(nParams);
-	}
+
 	return (y1 - y2) / (2 * alpha);
 }
 
@@ -166,16 +160,9 @@ std::vector<double> GraphSLAMer::ComputeJacobian(SE3 & cameraPose, KeyFrame keyf
 	{
 		//compute this section of the jacobian and store for jacobian compilation
 		double val = derivative(cameraPose, keyframe, image, rmean, i);
-		if (std::find(rvec.begin(), rvec.end(), val) != rvec.end())
-		{
-			badJacob = true;
-		}
 		rvec.push_back(val);
 	}
-	if (!badJacob)
-	{
-		std::cout << "Yay!" << std::endl;
-	}
+
 	return rvec;
 }
 
@@ -450,10 +437,7 @@ GraphSLAMer::SE3 GraphSLAMer::CalcGNPosOptimization(cv::Mat & image, KeyFrame ke
 		//calculate error with current residuals
 		//cv::Mat errorVec = CalcErrorVec(residuals);
 		double error = ComputeResiduals(camPose, keyframe, image, false, rmean);
-		if (error == 0)
-		{
-			break;
-		}
+
 		residualSum = error;
 		//update pose estimate
 		std::vector<double> jacobianRes = ComputeJacobian(cameraPose, keyframe, image, rmean, image.cols * image.rows);
@@ -467,20 +451,12 @@ GraphSLAMer::SE3 GraphSLAMer::CalcGNPosOptimization(cv::Mat & image, KeyFrame ke
 			jacobianMat.at<double>(0, j) = jacobianRes[j];
 		}
 		//calculate deltax from derivatives
-		cv::Mat deltaX = TransformJacobian(jacobianMat, residualErrorMat).t();
+		//cv::Mat deltaX = TransformJacobian(jacobianMat, residualErrorMat).t();
 		//SolveSparsecv::Matrix(H + lambda, b);
 
-		//store position
-		SE3 camOld(cameraPose.getRotationMat(), cameraPose.getTranslation(), cameraPose.getParameters());
+		cv::Mat deltaX = -error / jacobianMat;
 
 		cameraPose.addParameters(deltaX);
-		camPose = cameraPose.getlieMatrix();
-		//compute new residuals
-		double nresiduals = ComputeResiduals(camPose, keyframe, image, false, rmean);
-		if (error < nresiduals)
-		{
-			cameraPose = camOld;
-		}
 
 	}
 	return cameraPose;
@@ -669,7 +645,7 @@ void GraphSLAMer::ComputeQuadtreeForKeyframe(KeyFrame &kf)
 }
 
 //calculates the depths by comparing the image, after plcement into a power of 2 pyramid, against the keyframe quadtree leaves
-void GraphSLAMer::computeDepthsFromStereoPair(KeyFrame kf, cv::Mat & image, cv::Mat & cameraParams, SE3 cameraPos)
+void GraphSLAMer::computeDepthsFromStereoPair(KeyFrame & kf, cv::Mat & image, cv::Mat & cameraParams, SE3 cameraPos)
 {
 	int prows = image.rows;
 	int pcols = image.cols;
@@ -695,6 +671,8 @@ void GraphSLAMer::computeDepthsFromStereoPair(KeyFrame kf, cv::Mat & image, cv::
 						else if (lastImage.type() == 6)
 							avg += lastImage.at<double>(x + j, y + k);
 						else if (lastImage.type() == 16)
+							avg += cv::sum(lastImage.at<Vec3b>(x + j, y + k))[0];
+						else if (lastImage.type() == 22)
 							avg += cv::sum(lastImage.at<Vec3d>(x + j, y + k))[0];
 					}
 				}
@@ -1108,11 +1086,13 @@ GraphSLAMer::SE3 GraphSLAMer::LS_Graph_SLAM(cv::Mat cameraFrame)
 		lastKey = newKey;
 	}
 
+	std::cout << "Current estimated camera position:" << std::endl << position.getParameters() << std::endl << std::endl;
+
 	return position;
 }
 
 //Sets up matrices and other things
-void GraphSLAMer::Initialize_LS_Graph_SLAM(cv::Mat cameraFrame)
+void GraphSLAMer::Initialize_LS_Graph_SLAM(cv::Mat cameraFrame, cv::Mat cameraFrame2)
 {
 	//initialize lastKey
 	KeyFrame newKey;
@@ -1129,9 +1109,10 @@ void GraphSLAMer::Initialize_LS_Graph_SLAM(cv::Mat cameraFrame)
 	//computes the power tree for the image, allowing for fast analysis 
 	ComputeQuadtreeForKeyframe(newKey);
 
-	//generate constraints between old keyframe and new one(Aka stores the cameras approximate new position)
+
 	SE3 position;
 	cv::Mat constraints = position.getlieMatrix();
+	computeDepthsFromStereoPair(newKey, cameraFrame2, cameraParams, position);
 
 	//add new keyframe and constraints to list
 	keyframes.E.push_back(constraints);

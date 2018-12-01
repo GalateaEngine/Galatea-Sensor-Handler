@@ -284,7 +284,7 @@ public:
 	void ComputeQuadtreeForKeyframe(KeyFrame &kf);
 
 	//calculates the depths by comparing the image, after plcement into a power of 2 pyramid, against the keyframe quadtree leaves
-	void computeDepthsFromStereoPair(KeyFrame kf, cv::Mat & image, cv::Mat & cameraParams, SE3 cameraPos);
+	void computeDepthsFromStereoPair(KeyFrame & kf, cv::Mat & image, cv::Mat & cameraParams, SE3 cameraPos);
 
 	void projectDepthNodesToDepthMap(KeyFrame kf);
 
@@ -297,7 +297,7 @@ public:
 	SE3 LS_Graph_SLAM(cv::Mat cameraFrame);
 
 	//Sets up matrices and other things
-	void Initialize_LS_Graph_SLAM(cv::Mat cameraFrame);
+	void Initialize_LS_Graph_SLAM(cv::Mat cameraFrame, cv::Mat cameraFrame2);
 
 	//passes over keyframes and constraints and returns a list of points
 	std::vector<cv::Point3d> get3dPoints();

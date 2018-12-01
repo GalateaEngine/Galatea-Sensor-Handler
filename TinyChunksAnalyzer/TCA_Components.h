@@ -42,6 +42,7 @@ public:
 	set<cv::Point2f> pSet;
 	cv::viz::Viz3d viewer;
 	bool widgetSet = false;
+	int widgetCount = 0;
 	std::vector<Point3d> pCloud;
 	std::vector<Vec3b> pColours;
 	cv::Mat colours;
