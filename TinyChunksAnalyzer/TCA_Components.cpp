@@ -11,6 +11,8 @@ TCA_Video::TCA_Video()
 	ready = true;
 	if (!cap.open(701))
 		ready = false;
+	cap.set(CV_CAP_PROP_FRAME_WIDTH, 320);
+	cap.set(CV_CAP_PROP_FRAME_HEIGHT, 240);
 	objects = 0;
 	objectMap.empty();
 	bool useNaiveEdge = false;
@@ -243,7 +245,6 @@ bool TCA_Video::update()
 			viewer.spinOnce();
 			//viewer.removeAllWidgets();
 			//std::this_thread::sleep_for(std::chrono::milliseconds(10));
-			cv::waitKey(10000);
 		}
 		return true;
 	}

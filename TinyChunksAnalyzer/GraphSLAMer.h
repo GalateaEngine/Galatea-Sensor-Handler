@@ -26,22 +26,44 @@ public:
 	class SE3
 	{
 	private:
-		cv::Mat rotation;
+		cv::Mat rotationMat;
 		cv::Mat translation;
 		cv::Mat lieMat;
+		cv::Mat parameters;
+
 	public:
+
 
 		SE3()
 		{
 			//create proper size matrices at origin
 			translation = cv::Mat::zeros(1, 3, CV_64FC1);
-			rotation = cv::Mat::eye(3, 3, CV_64FC1);
+			rotationMat = cv::Mat::eye(3, 3, CV_64FC1);
 
 			lieMat = cv::Mat::zeros(3, 4, CV_64FC1);
 			//set rotation
 			for (int x = 0; x < 3; x++)
 				for (int y = 0; y < 3; y++)
-					lieMat.at<double>(x, y) = rotation.at<double>(x, y);
+					lieMat.at<double>(x, y) = rotationMat.at<double>(x, y);
+			//set translation
+			for (int i = 0; i < 3; i++)
+				lieMat.at<double>(i, 3) = translation.at<double>(0, i);
+
+			//contains rotation x y z in decimal (0->1) followed by translation x y z
+			parameters = cv::Mat::zeros(1, 6, CV_64FC1);
+		}
+
+		SE3(cv::Mat _rotation, cv::Mat _translation, cv::Mat _parameters)
+		{
+			rotationMat = _rotation.clone();
+			translation = _translation.clone();
+			parameters = _parameters.clone();
+
+			lieMat = cv::Mat::zeros(3, 4, CV_64FC1);
+			//set rotation
+			for (int x = 0; x < 3; x++)
+				for (int y = 0; y < 3; y++)
+					lieMat.at<double>(x, y) = rotationMat.at<double>(x, y);
 			//set translation
 			for (int i = 0; i < 3; i++)
 				lieMat.at<double>(i, 3) = translation.at<double>(0, i);
@@ -49,88 +71,116 @@ public:
 			//lieMat.at<double>(3, 3) = 1;
 		}
 
-		SE3(cv::Mat _rotation, cv::Mat _translation)
+		void setRotation(double x, double y, double z)
 		{
-			rotation = _rotation;
-			translation = _translation;
+			double * paramPointer = parameters.ptr<double>(0);
+			paramPointer[0] = x;
+			paramPointer[1] = y;
+			paramPointer[2] = z;
 
-			lieMat = cv::Mat::zeros(3, 4, CV_64FC1);
+			//get our row refrences
+			double * row1 = rotationMat.ptr<double>(0);
+			double * row2 = rotationMat.ptr<double>(1);
+			double * row3 = rotationMat.ptr<double>(2);
+
+			//set up our trig values
+			double cosa = cos(x);
+			double cosb = cos(y);
+			double cosc = cos(z);
+			double sina = sin(x);
+			double sinb = sin(y);
+			double sinc = sin(z);
+
+			double sinbcosc = sinb * cosc;
+			double sinbsinc = sinb * sinc;
+
+			//set row 1
+			row1[0] = cosb * cosc;
+			row1[1] = -cosb * sinc;
+			row1[2] = sinb;
+
+			//set row 2
+			row2[0] = cosa * sinc + sina * sinbcosc;
+			row2[1] = cosa * cosc - sina * sinbsinc;
+			row2[2] = -sina * cosb;
+
+			//set row 3
+			row3[0] = sina * sinc - cosa * sinbcosc;
+			row3[1] = sina * cosc + cosa * sinbsinc;
+			row3[2] = cosa * cosb;
+
 			//set rotation
 			for (int x = 0; x < 3; x++)
 				for (int y = 0; y < 3; y++)
-					lieMat.at<double>(x, y) = rotation.at<double>(x, y);
+					lieMat.at<double>(x, y) = rotationMat.at<double>(x, y);
+		}
+
+
+		void setTranslation(double x, double y, double z)
+		{
+			translation.at<double>(0, 0) = x;
+			lieMat.at<double>(0, 3) = x;
+			parameters.at<double>(0, 3) = x;
+
+			translation.at<double>(0, 1) = y;
+			lieMat.at<double>(1, 3) = y;
+			parameters.at<double>(0, 4) = y;
+
+			translation.at<double>(0, 2) = z;
+			lieMat.at<double>(2, 3) = z;
+			parameters.at<double>(0, 5) = z;
+		}
+
+		void addSE3(SE3 lieAdd)
+		{
+			cv::Mat inLieMat = lieAdd.getlieMatrix();
+			
 			//set translation
-			for (int i = 0; i < 3; i++)
-				lieMat.at<double>(i, 3) = translation.at<double>(0, i);
-
-			//lieMat.at<double>(3, 3) = 1;
-		}
-
-		void addRotation(cv::Mat rotationAdd)
-		{
-			for (int x = 0; x < 3; x++)
-				for (int y = 0; y < 3; y++)
-				{
-					lieMat.at<double>(x, y) += rotationAdd.at<double>(x, y);
-					rotation.at<double>(x, y) += rotationAdd.at<double>(x, y);
-				}
-
-		}
-
-		void addTranslation(cv::Mat translationAdd)
-		{
 			for (int i = 0; i < 3; i++)
 			{
-				lieMat.at<double>(i, 3) = translationAdd.at<double>(0, i);
+				translation.at<double>(0, i) += inLieMat.at<double>(i, 3);
+				lieMat.at<double>(i, 3) = translation.at<double>(0, i);
 			}
-		}
 
-		void addLie(cv::Mat lieAdd)
-		{
-			for (int x = 0; x < 3; x++)
-				for (int y = 0; y < 4; y++)
-				{
-					lieMat.at<double>(x, y) += lieAdd.at<double>(x, y);
-				}
-			//set rotation
-			for (int x = 0; x < 3; x++)
-				for (int y = 0; y < 3; y++)
-					rotation.at<double>(x, y) = lieMat.at<double>(x, y);
-			//set translation
-			for (int i = 0; i < 3; i++)
-				translation.at<double>(0, i) = lieMat.at<double>(i, 3);
+			parameters += lieAdd.getParameters();
+			setRotation(parameters.ptr<double>(0)[0], parameters.ptr<double>(0)[1], parameters.ptr<double>(0)[2]);
 
 		}
 
-		cv::Mat getRotation()
+		void addParameters(cv::Mat _para)
 		{
-			return rotation;
+			setParameters(parameters + _para);
+		}
+
+		void setParameters(cv::Mat _params)
+		{
+			parameters = _params.clone();
+			double * paraPointer = parameters.ptr<double>(0);
+			setRotation(paraPointer[0], paraPointer[1], paraPointer[2]);
+			setTranslation(paraPointer[3], paraPointer[4], paraPointer[5]);
+		}
+
+		cv::Mat getRotationMat()
+		{
+			return rotationMat.clone();
 		}
 
 		cv::Mat getTranslation()
 		{
-			return translation;
+			return translation.clone();
 		}
 
 		//constructs and returns the lie matrix
 		cv::Mat getlieMatrix()
 		{
 			//std::cout << lieMat;
-			return lieMat;
+			return lieMat.clone();
 		}
 
-		//calculatres the 3x4 extrinsic matrix
-		cv::Mat getExtrinsicMatrix()
+		//parameters contains rotation x y z in decimal (0->1) followed by translation x y z
+		cv::Mat getParameters()
 		{
-			cv::Mat eMat = cv::Mat::zeros(3, 4, CV_64FC1);
-			
-			for (int x = 0; x < 3; x++)
-				for (int y = 0; y < 4; y++)
-				{
-					eMat.at<double>(x, y) = lieMat.at<double>(x, y);
-				}
-
-			return eMat;
+			return parameters.clone();
 		}
 	};
 
@@ -166,28 +216,6 @@ public:
 		cv::Mat paramsTimesPoseInv;
 	};
 
-	//for holding processed pixels that appear in both the keyframe and the current frame
-	class pPixel
-	{
-	public:
-		pPixel()
-		{
-			for (int i = 0; i < 12; i++)
-			{
-				derivatives[i] = 0.0;
-			}
-		}
-		cv::Point2f imagePixel;
-		cv::Point2f keyframePixel;
-		cv::Point3d worldPoint;
-		double depth;
-		double residualSum;
-		double keyframeIntensity;
-		double imageIntensity;
-		//16 is for the number of numbers in a sim(3) var
-		double derivatives[12];
-	};
-
 	class PoseGraph
 	{
 	public:
@@ -206,8 +234,6 @@ public:
 	PoseGraph keyframes;
 	KeyFrame lastKey;
 
-	double findY(double kfPixelSum, double kfPixelVariance, cv::Point2i projectedPoint, cv::Mat &image, double rmean);
-
 	//turns the given point into a homogeneouse point
 	cv::Mat makeHomo(cv::Mat x);
 
@@ -222,14 +248,14 @@ public:
 	//solve for delta x in (H * dX = -b)
 	cv::Mat SolveSparseMatrix(cv::Mat H, cv::Mat b);
 
-	double CalcErrorVal(std::vector<pPixel> residuals);
+	double CalcErrorVal(double residuals);
 
 
-	double derivative(cv::Mat & cameraPose, cv::Point3d worldPointP, double pixelSum, double kfPixelVariance, cv::Mat & image, double rmean, int bIndexX, int bIndexY);
+	double derivative(SE3 & cameraPose, KeyFrame & keyframe, cv::Mat & image, double rmean, int bIndexX);
 
-	std::vector<pPixel> ComputeJacobian(cv::Mat & cameraParams, SE3 cameraPose, KeyFrame keyframe, cv::Mat & image, double rmean, int numRes);
+	std::vector<double> ComputeJacobian(SE3 & cameraPose, KeyFrame keyframe, cv::Mat & image, double rmean, int numRes);
 
-	std::vector<pPixel> ComputeResiduals(cv::Mat & cameraParams, SE3 cameraPose, KeyFrame keyframe, cv::Mat & image, double rmean);
+	double ComputeResiduals(cv::Mat & cameraPose, KeyFrame keyframe, cv::Mat & image,bool dcheck, double rmean);
 
 
 	//predicts new position based on dampened approximate velocity
@@ -237,20 +263,17 @@ public:
 
 
 	//turns the world point into a pixel value
-	cv::Point projectWorldPointToCameraPointU(cv::Mat & cameraParamsInv, cv::Mat & cameraPoseT, cv::Point3d wPointP);
+	cv::Point2d projectWorldPointToCameraPointU(cv::Mat & cameraParamsInv, cv::Mat & cameraPoseT, cv::Point3d wPointP);
 
 	//turns a pixel value into a world point
-	cv::Point3d projectCameraPointToWorldPointP(cv::Mat & cameraParamsK, cv::Mat & cameraPoseT, cv::Point cPointU, double depth);
+	cv::Point3d projectCameraPointToWorldPointP(cv::Mat & cameraParamsK, cv::Mat & cameraPoseT, cv::Point2d cPointU, double depth);
 
 
 	double HuberNorm(double x, double epsilon);
 
-	cv::Mat CalcErrorVec(std::vector<pPixel> pixels);
+	//cv::Mat CalcErrorVec(std::vector<pPixel> pixels);
 
-	//pixel U is in fact an index
-	double calcPhotometricResidual(double kfPixelSum, cv::Point2i projectedPoint, cv::Mat & imageT, double globalResidue);
-
-	void ComputeMedianResidualAndCorrectedPhotometricResiduals(cv::Mat & cameraParams, SE3 cameraPose, cv::Mat & image, KeyFrame kf, std::vector<pPixel> & results, double & median);
+	void ComputeMedianResidualAndCorrectedPhotometricResiduals(cv::Mat & cameraParams, SE3 cameraPose, cv::Mat & image, KeyFrame kf, double & median);
 
 
 	//computes the update
