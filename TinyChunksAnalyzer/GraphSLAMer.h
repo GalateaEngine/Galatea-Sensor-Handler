@@ -9,13 +9,25 @@ public:
 	//google search "opencv camera calibration" for an easy guide
 	//(Todo: add autocv::Matic camera calibration)
 	cv::Mat cameraParams = (cv::Mat_<double>(3, 3) << 5.7481157594243552e+02, 0.0, 320.0, 0.0, 5.7481157594243552e+02, 240.0, 0.0, 0.0, 1.0);
+	//get some class-wide pointers and values for camera param rows/entries for fast access
+	double * cpPoint0 = cameraParams.ptr<double>(0);
+	double * cpPoint1 = cameraParams.ptr<double>(1);
+	double fx_d = cpPoint0[0];
+	double cx_d = cpPoint0[2];
+	double fy_d = cpPoint1[1];
+	double cy_d = cpPoint1[2];
 
+	//this creates a scalar to modify indexes when the image is shurnk down from default camera size
+	double imageScale;
 
 	cv::Mat lastPos;
 	cv::Mat velocity;
-	int quadTreeDepth = 4;
+	double alpha[7];
+	const int quadTreeDepth = 4;
 
-
+	//std::thread positionThread;
+	//std::thread depthThread;
+	//std::thread makeKeyframe;
 
 	cv::Mat cameraParamsInv = cameraParams.inv();
 
@@ -23,43 +35,48 @@ public:
 	//contains both the translation and rotation for a given object in 3d space
 	//methods can export the lie matrix, its individual components, or it's applied 3x3 extrinsic matrix
 
-	class SE3
+	class SIM3
 	{
 	private:
 		cv::Mat rotationMat;
 		cv::Mat translation;
 		cv::Mat lieMat;
 		cv::Mat parameters;
+		double scale = 1;
 
 	public:
 
-
-		SE3()
+		SIM3 operator*(const SIM3 in)
 		{
-			//create proper size matrices at origin
-			translation = cv::Mat::zeros(1, 3, CV_64FC1);
-			rotationMat = cv::Mat::eye(3, 3, CV_64FC1);
-
-			lieMat = cv::Mat::zeros(3, 4, CV_64FC1);
-			//set rotation
-			for (int x = 0; x < 3; x++)
-				for (int y = 0; y < 3; y++)
-					lieMat.at<double>(x, y) = rotationMat.at<double>(x, y);
-			//set translation
-			for (int i = 0; i < 3; i++)
-				lieMat.at<double>(i, 3) = translation.at<double>(0, i);
-
-			//contains rotation x y z in decimal (0->1) followed by translation x y z
-			parameters = cv::Mat::zeros(1, 6, CV_64FC1);
+			//verify when more sane that consecutive rotations applied as they are here indeed simply relate to the theta values by stright addition
+			//we'll just get theta from the rotation matrix for now, this can be a potential time save later
+			//also check if we can replace the pow mess with abs
+			cv::Mat trotation = rotationMat * in.rotationMat;
+			cv::Mat ttranslation = rotationMat * in.translation.t() + (1.0 / scale) * translation.t();
+			cv::Mat tparameters(1, 7, CV_64FC1);
+			tparameters = parameters + in.parameters;
+			tparameters.at<double>(0, 6) = in.parameters.at<double>(0, 6);
+			return SIM3(trotation, ttranslation.t(), tparameters);
 		}
 
-		SE3(cv::Mat _rotation, cv::Mat _translation, cv::Mat _parameters)
+		SIM3()
+		{
+			translation = cv::Mat::zeros(1, 3, CV_64FC1);
+			rotationMat = cv::Mat::eye(3, 3, CV_64FC1);
+			lieMat = cv::Mat::eye(4, 4, CV_64FC1);
+			parameters = cv::Mat::zeros(1, 7, CV_64FC1);
+
+			//create proper size matrices at origin
+			scale = parameters.at<double>(0, 6) = 1;
+		}
+
+		SIM3(cv::Mat _rotation, cv::Mat _translation, cv::Mat _parameters)
 		{
 			rotationMat = _rotation.clone();
 			translation = _translation.clone();
 			parameters = _parameters.clone();
 
-			lieMat = cv::Mat::zeros(3, 4, CV_64FC1);
+			lieMat = cv::Mat::zeros(4, 4, CV_64FC1);
 			//set rotation
 			for (int x = 0; x < 3; x++)
 				for (int y = 0; y < 3; y++)
@@ -68,15 +85,30 @@ public:
 			for (int i = 0; i < 3; i++)
 				lieMat.at<double>(i, 3) = translation.at<double>(0, i);
 
-			//lieMat.at<double>(3, 3) = 1;
+			lieMat.at<double>(3, 3) = parameters.at<double>(0,6);
+			scale = parameters.at<double>(0, 6);
+		}
+
+		SIM3(cv::Mat _parameters)
+		{
+			//create proper size matrices at origin
+			translation = cv::Mat::zeros(1, 3, CV_64FC1);
+			rotationMat = cv::Mat::eye(3, 3, CV_64FC1);
+			lieMat = cv::Mat::zeros(4, 4, CV_64FC1);
+
+			setParameters(_parameters);
 		}
 
 		void setRotation(double x, double y, double z)
 		{
+
 			double * paramPointer = parameters.ptr<double>(0);
-			paramPointer[0] = x;
-			paramPointer[1] = y;
-			paramPointer[2] = z;
+			if (x > 2 * 3.141592 || x < -2 * 3.141592) paramPointer[0] = 2 * 3.141592;
+			else paramPointer[0] = x;
+			if (y > 2 * 3.141592 || y < -2 * 3.141592) paramPointer[1] = 2 * 3.141592;
+			else paramPointer[1] = y;
+			if (z > 2 * 3.141592 || z < -2 * 3.141592) paramPointer[2] = 2 * 3.141592;
+			else paramPointer[2] = z;
 
 			//get our row refrences
 			double * row1 = rotationMat.ptr<double>(0);
@@ -131,7 +163,7 @@ public:
 			parameters.at<double>(0, 5) = z;
 		}
 
-		void addSE3(SE3 lieAdd)
+		void addSIM3(SIM3 lieAdd)
 		{
 			cv::Mat inLieMat = lieAdd.getlieMatrix();
 			
@@ -144,7 +176,7 @@ public:
 
 			parameters += lieAdd.getParameters();
 			setRotation(parameters.ptr<double>(0)[0], parameters.ptr<double>(0)[1], parameters.ptr<double>(0)[2]);
-
+			scale = lieMat.at<double>(3, 3) = parameters.at<double>(0, 6);
 		}
 
 		void addParameters(cv::Mat _para)
@@ -154,20 +186,35 @@ public:
 
 		void setParameters(cv::Mat _params)
 		{
-			parameters = _params.clone();
+			if (_params.cols == 7)
+			{
+				parameters = _params.clone();
+				scale = lieMat.at<double>(3, 3) = parameters.at<double>(0, 6);
+			}
+			else
+			{
+				parameters = cv::Mat(1, 7, CV_64FC1);
+				for (int i = 0; i < 6; i++)
+				{
+					parameters.at<double>(0, i) = _params.at<double>(0, i);
+				}
+				scale = lieMat.at<double>(3, 3) = parameters.at<double>(0, 6) = 1.0;
+			}
+			
 			double * paraPointer = parameters.ptr<double>(0);
 			setRotation(paraPointer[0], paraPointer[1], paraPointer[2]);
 			setTranslation(paraPointer[3], paraPointer[4], paraPointer[5]);
+			
 		}
 
 		cv::Mat getRotationMat()
 		{
-			return rotationMat.clone();
+			return (rotationMat * scale);
 		}
 
 		cv::Mat getTranslation()
 		{
-			return translation.clone();
+			return (translation * scale);
 		}
 
 		//constructs and returns the lie matrix
@@ -191,9 +238,11 @@ public:
 		double xGradient;
 		double yGradient;
 		double depth;
-		double depthVariance;
+		double depthDeviation = rand() + 1;
+		double mean;
+		double updateCount = 1;
 		int numChildren;
-		cv::Point2f position;
+		cv::Point position;
 		int length;
 		int width;
 		bool fLeaf;
@@ -209,11 +258,14 @@ public:
 	public:
 		cv::Mat inverseDepthD;
 		cv::Mat scaledImageI;//mean 1
-		cv::Mat inverseDepthVarianceV;
-		SE3 cameraTransformationAndScaleS; //taken and scaled with repsect to the world frame W aka the first frame. This is an element of Sim(3)
-		std::vector<QuadTreeNode> quadTreeLeaves; //contains the significant quad tree nodes
+		cv::Mat origImage;
+		cv::Mat depthVarianceV;
+		SIM3 cameraTransformationAndScaleS; //taken and scaled with repsect to the world frame W aka the first frame. This is an element of Sim(3)
+		QuadTreeNode * quadTreeLeaves; //contains the significant quad tree nodes
+		int quadTreeNodeCount = 0;
 		cv::Mat paramsTimesPose;
 		cv::Mat paramsTimesPoseInv;
+		std::vector<cv::Mat> pyramid;
 	};
 
 	class PoseGraph
@@ -248,14 +300,16 @@ public:
 	//solve for delta x in (H * dX = -b)
 	cv::Mat SolveSparseMatrix(cv::Mat H, cv::Mat b);
 
-	double CalcErrorVal(double residuals);
+	double CalcErrorVal(cv::Mat residuals);
 
 
-	double derivative(SE3 & cameraPose, KeyFrame & keyframe, cv::Mat & image, double rmean, int bIndexX);
+	cv::Mat derivative(SIM3 & cameraPose, KeyFrame & keyframe, cv::Mat & image, double rmean, int bIndexX);
 
-	std::vector<double> ComputeJacobian(SE3 & cameraPose, KeyFrame keyframe, cv::Mat & image, double rmean, int numRes);
+	cv::Mat ComputeJacobian(SIM3 & cameraPose, KeyFrame keyframe, cv::Mat & image, double rmean, int numRes);
 
-	double ComputeResiduals(cv::Mat & cameraPose, KeyFrame keyframe, cv::Mat & image,bool dcheck, double rmean);
+	cv::Mat ComputeResiduals(cv::Mat & cameraPose, KeyFrame keyframe, cv::Mat & image,bool dcheck, double rmean);
+
+	double ComputeResidualError(cv::Mat & cameraPose, KeyFrame keyframe, cv::Mat & image, bool dcheck, double rmean);
 
 
 	//predicts new position based on dampened approximate velocity
@@ -263,30 +317,27 @@ public:
 
 
 	//turns the world point into a pixel value
-	cv::Point2d projectWorldPointToCameraPointU(cv::Mat & cameraParamsInv, cv::Mat & cameraPoseT, cv::Point3d wPointP);
+	void projectWorldPointToCameraPointU(double * poseRow1, double * poseRow2, double * poseRow3, double poseScale, double inX, double inY, double inZ, int & returnX, int & returnY);
 
 	//turns a pixel value into a world point
-	cv::Point3d projectCameraPointToWorldPointP(cv::Mat & cameraParamsK, cv::Mat & cameraPoseT, cv::Point2d cPointU, double depth);
+	void projectCameraPointToWorldPointP(double * poseRow1, double * poseRow2, double * poseRow3, double poseScale, int inX, int inY, double depth, double & returnX, double & returnY, double & returnZ);
 
 
 	double HuberNorm(double x, double epsilon);
 
-	//cv::Mat CalcErrorVec(std::vector<pPixel> pixels);
-
-	void ComputeMedianResidualAndCorrectedPhotometricResiduals(cv::Mat & cameraParams, SE3 cameraPose, cv::Mat & image, KeyFrame kf, double & median);
-
+	cv::Mat applyVarianceWeights(cv::Mat & jacobianTranspose, KeyFrame kf);
 
 	//computes the update
-	cv::Mat TransformJacobian(cv::Mat & jacobian, cv::Mat & residuals);
+	cv::Mat TransformJacobian(cv::Mat & jacobian, KeyFrame kf, cv::Mat residuals);
 
-	SE3 CalcGNPosOptimization(cv::Mat & image, KeyFrame keyframe);
+	SIM3 CalcGNPosOptimization(cv::Mat & image, KeyFrame keyframe);
 
 	void ComputeQuadtreeForKeyframe(KeyFrame &kf);
 
 	//calculates the depths by comparing the image, after plcement into a power of 2 pyramid, against the keyframe quadtree leaves
-	void computeDepthsFromStereoPair(KeyFrame & kf, cv::Mat & image, cv::Mat & cameraParams, SE3 cameraPos);
+	void computeDepthsFromStereoPair(KeyFrame & kf, cv::Mat & image, cv::Mat & cameraParams, SIM3 cameraPos, bool initialize = false);
 
-	void projectDepthNodesToDepthMap(KeyFrame kf);
+	void projectDepthNodesToDepthMap(KeyFrame & kf);
 
 
 	//The main function for LS Graph SLAM. Takes input in the form of camera frames, and returns a matrix with the approximate position of the camera. 
@@ -294,12 +345,12 @@ public:
 	//enhanced implementation of https://groups.csail.mit.edu/rrg/papers/greene_icra16.pdf
 	//K: is a 3x3 real mat with the camera parameters
 	//pi: perspective projection function
-	SE3 LS_Graph_SLAM(cv::Mat cameraFrame);
+	SIM3 LS_Graph_SLAM(cv::Mat cameraFrame);
 
 	//Sets up matrices and other things
 	void Initialize_LS_Graph_SLAM(cv::Mat cameraFrame, cv::Mat cameraFrame2);
 
 	//passes over keyframes and constraints and returns a list of points
-	std::vector<cv::Point3d> get3dPoints();
-	std::vector<cv::Vec3b> get3dColours();
+	void get3dPointsAndColours(std::vector<cv::Point3d> & pcloud_est, std::vector<cv::Vec3b> & colours);
+	void get3dColours(std::vector<cv::Vec3b> & pColours);
 };

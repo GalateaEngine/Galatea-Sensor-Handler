@@ -37,6 +37,12 @@ public:
 class TCA_Video
 {
 public:
+	
+	cv::Mat cameraParams = (cv::Mat_<double>(3, 3) << 5.7481157594243552e+02, 0.0, 320.0, 0.0, 5.7481157594243552e+02, 240.0, 0.0, 0.0, 1.0);
+
+	//SLAM runners
+	GraphSLAMer gs;
+
 	int objects;
 	map<int, TCA_Object> objectMap;
 	set<cv::Point2f> pSet;
@@ -58,9 +64,6 @@ public:
 	bool ready;
 	bool useNaiveEdge = false;
 	bool useGraphSLAM = true;
-
-	//SLAM runners
-	GraphSLAMer gs;
 
 	TCA_Video();
 

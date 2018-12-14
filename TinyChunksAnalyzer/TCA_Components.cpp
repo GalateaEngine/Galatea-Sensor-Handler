@@ -11,8 +11,8 @@ TCA_Video::TCA_Video()
 	ready = true;
 	if (!cap.open(701))
 		ready = false;
-	cap.set(CV_CAP_PROP_FRAME_WIDTH, 320);
-	cap.set(CV_CAP_PROP_FRAME_HEIGHT, 240);
+	//cap.set(CV_CAP_PROP_FRAME_WIDTH, 320);
+	//cap.set(CV_CAP_PROP_FRAME_HEIGHT, 240);
 	objects = 0;
 	objectMap.empty();
 	bool useNaiveEdge = false;
@@ -24,8 +24,8 @@ TCA_Video::TCA_Video()
 		std::cout << "reposition camera then hit enter" << std::endl;
 		std::cin.get();
 		cap >> frame2;
-		frame.convertTo(frame, CV_64FC3, 1.f / 255);
-		frame2.convertTo(frame2, CV_64FC3, 1.f / 255);
+		//frame.convertTo(frame, CV_64FC3, 1.f / 255);
+		//frame2.convertTo(frame2, CV_64FC3, 1.f / 255);
 		gs.Initialize_LS_Graph_SLAM(frame, frame2);
 		viewer = cv::viz::Viz3d("Point Cloud");
 	}
@@ -194,7 +194,7 @@ bool TCA_Video::update()
 
 		cv::Mat frame;
 		cap >> frame;
-		frame.convertTo(frame, CV_64FC3, 1.f / 255);
+		//frame.convertTo(frame, CV_64FC3, 1.f / 255);
 		imshow("VideoFeed1", frame);
 		if (frame.empty())
 		{
@@ -230,24 +230,26 @@ bool TCA_Video::update()
 		else if (useGraphSLAM)
 		{
 			//runs the graph slam process for the given frame, and returns the current position of the camera as an SE3 object
-			GraphSLAMer::SE3 location = gs.LS_Graph_SLAM(frame);
+			GraphSLAMer::SIM3 location = gs.LS_Graph_SLAM(frame);
 
 			//get back current list of 3d points
 			//pCloud.clear();
 			//pColours.clear();
-			pCloud = gs.get3dPoints();
-			pColours = gs.get3dColours();
-			if (pCloud.size() > 0 && widgetCount > 5)
+			gs.get3dPointsAndColours(pCloud, pColours);
+			//gs.get3dColours(pColours);
+			if (pCloud.size() > 0)
 			{
 				if (!widgetSet)
 				{
 					widgetSet = true;
 					viz::WCloud cloud_widget(pCloud, pColours);
 					viewer.showWidget("Point Cloud", cloud_widget);
+					//viewer.spinOnce(1,true);
+					//viewer.setCamera(cv::viz::Camera(Matx33d(gs.cameraParams), viewer.getWindowSize()));
 				}
 			}
-			widgetCount++;
-			viewer.spinOnce();
+			//widgetCount++;
+			viewer.spinOnce(1, true);
 			cv::Affine3d pose(location.getRotationMat(), location.getTranslation());
 			viewer.setViewerPose(pose);
 			//viewer.removeAllWidgets();
