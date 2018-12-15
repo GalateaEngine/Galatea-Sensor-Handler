@@ -237,9 +237,16 @@ public:
 		double avgIntensity;
 		double xGradient;
 		double yGradient;
-		double depth;
-		double depthDeviation = rand() + 1;
+		double depth = rand() + 1;
+		double depthDeviation = 0.9;
+		double intensityMean;
+		double intensityVariance;
 		double mean;
+		double weightValue;
+		bool needsWeightUpdate = true;
+		int pixelPosXGuess;
+		double pixelPosStD;
+		cv::Mat aprox3dPosition;
 		double updateCount = 1;
 		int numChildren;
 		cv::Point position;
@@ -247,6 +254,7 @@ public:
 		int width;
 		bool fLeaf;
 		bool valid;
+		bool needsProjecting = true;
 		int strikes;
 		int layer;
 		QuadTreeNode *parent;
@@ -263,8 +271,8 @@ public:
 		SIM3 cameraTransformationAndScaleS; //taken and scaled with repsect to the world frame W aka the first frame. This is an element of Sim(3)
 		QuadTreeNode * quadTreeLeaves; //contains the significant quad tree nodes
 		int quadTreeNodeCount = 0;
-		cv::Mat paramsTimesPose;
-		cv::Mat paramsTimesPoseInv;
+		double posVariance = 1.0;
+		cv::Mat posCovariance;
 		std::vector<cv::Mat> pyramid;
 	};
 
@@ -339,6 +347,7 @@ public:
 
 	void projectDepthNodesToDepthMap(KeyFrame & kf);
 
+	void transplantDepthsToNewKeyFrame(KeyFrame & newKF, KeyFrame & oldKF);
 
 	//The main function for LS Graph SLAM. Takes input in the form of camera frames, and returns a matrix with the approximate position of the camera. 
 	//Also builds a map behind the scenes for which the point cloud can be accessed by the helper functions
