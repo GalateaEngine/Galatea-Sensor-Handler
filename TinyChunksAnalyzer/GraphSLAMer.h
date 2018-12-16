@@ -163,6 +163,13 @@ public:
 			parameters.at<double>(0, 5) = z;
 		}
 
+		void setScale(double _scale)
+		{
+			scale = _scale;
+			parameters.at<double>(0, 6) = scale;
+			lieMat.at<double>(3, 3) = scale;
+		}
+
 		void addSIM3(SIM3 lieAdd)
 		{
 			cv::Mat inLieMat = lieAdd.getlieMatrix();
@@ -237,15 +244,12 @@ public:
 		double avgIntensity;
 		double xGradient;
 		double yGradient;
-		double depth = rand() + 1;
 		double depthDeviation = 0.9;
-		double intensityMean;
-		double intensityVariance;
-		double mean;
+		double intensityMean = 0;
+		double intensityVariance= 0.9;
+		double meanDepth = (rand() / 32767.0) + 0.5;
 		double weightValue;
 		bool needsWeightUpdate = true;
-		int pixelPosXGuess;
-		double pixelPosStD;
 		cv::Mat aprox3dPosition;
 		double updateCount = 1;
 		int numChildren;
@@ -340,7 +344,7 @@ public:
 
 	SIM3 CalcGNPosOptimization(cv::Mat & image, KeyFrame keyframe);
 
-	void ComputeQuadtreeForKeyframe(KeyFrame &kf);
+	void ConstructQuadtreeForKeyframe(KeyFrame &kf);
 
 	//calculates the depths by comparing the image, after plcement into a power of 2 pyramid, against the keyframe quadtree leaves
 	void computeDepthsFromStereoPair(KeyFrame & kf, cv::Mat & image, cv::Mat & cameraParams, SIM3 cameraPos, bool initialize = false);

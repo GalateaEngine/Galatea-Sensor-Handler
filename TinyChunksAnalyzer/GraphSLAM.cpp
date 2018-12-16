@@ -218,7 +218,7 @@ cv::Mat GraphSLAMer::ComputeResiduals(Mat & cameraPose, KeyFrame keyframe, cv::M
 	{
 		QuadTreeNode * leaf = &keyframe.quadTreeLeaves[x];
 		//get pixel location with respect to our new frame
-		double keyDepthAtU = 1.0 / leaf->mean;
+		double keyDepthAtU = 1.0 / leaf->meanDepth;
 		if (keyDepthAtU == 0 || isinf(keyDepthAtU))
 		{
 			resRowIndex[x] = 0;
@@ -241,7 +241,7 @@ cv::Mat GraphSLAMer::ComputeResiduals(Mat & cameraPose, KeyFrame keyframe, cv::M
 
 		//calc photometric residue
 		double r = (kfImage[leaf->position.y] - image.ptr<uchar>(xIndex)[yIndex]) / 255.0;
-		resRowIndex[x] = HuberNorm((r * r) * (1.0 / leaf->depthDeviation), 3); //I guess 3 is just a maagggiiicc number (2 sources doing visual odometry have used it so who am I to question it?)
+		resRowIndex[x] = HuberNorm(leaf->weightValue * (r * r) * (1.0 / leaf->depthDeviation), 3); //I guess 3 is just a maagggiiicc number (2 sources doing visual odometry have used it so who am I to question it?)
 	}
 	return residuals;
 }
@@ -273,7 +273,7 @@ double GraphSLAMer::ComputeResidualError(Mat & cameraPose, KeyFrame keyframe, cv
 	{
 		QuadTreeNode * leaf = &keyframe.quadTreeLeaves[x];
 		//get pixel location with respect to our new frame
-		double keyDepthAtU = 1.0 / leaf->mean;
+		double keyDepthAtU = 1.0 / leaf->meanDepth;
 		if (keyDepthAtU == 0 || isinf(keyDepthAtU)) continue;
 
 		uchar *kfImage = (*processedImage).ptr<uchar>(leaf->position.x);
@@ -391,7 +391,7 @@ cv::Mat GraphSLAMer::applyVarianceWeights(cv::Mat & jacobianTranspose, KeyFrame 
 				//the weired number and complextiy comes from subbing the simple (r-mean)/std into the error function and a log and then taking the derivative
 				double stdSquared = kf.quadTreeLeaves[c].depthDeviation * kf.quadTreeLeaves[c].depthDeviation;
 				double changedResidual = -resPtr[c] * 0.707106781186547524401;//M_SQRT1_2
-				double mean = kf.quadTreeLeaves[c].mean;
+				double mean = kf.quadTreeLeaves[c].meanDepth;
 				double exponent = (changedResidual * changedResidual - 4 * changedResidual * mean - mean * mean) / stdSquared;
 				//awweee ya I just remembered chain rule
 				double g = prefix * exp(-exponent);
@@ -528,7 +528,7 @@ double getPercent(double x1, double x2)
 }
 
 
-void GraphSLAMer::ComputeQuadtreeForKeyframe(KeyFrame &kf)
+void GraphSLAMer::ConstructQuadtreeForKeyframe(KeyFrame &kf)
 {
 	double thresholdSquared = 0.01;// 0.01;//10% post square
 	cv::Mat image = kf.scaledImageI;
@@ -707,6 +707,7 @@ void GraphSLAMer::ComputeQuadtreeForKeyframe(KeyFrame &kf)
 							{
 								if (branch.children[k]->fLeaf && branch.children[k]->valid)
 								{
+									branch.children[k];
 									finalNodes.push_back(*branch.children[k]);
 								}
 								else if (!branch.children[k]->fLeaf)
@@ -968,6 +969,7 @@ void GraphSLAMer::computeDepthsFromStereoPair(KeyFrame & kf, cv::Mat & image, cv
 		int bestPosX;
 		int bestPosY;
 		//this stores our minimum variances for threshold checking
+		double bestPhotoValue = 0;
 		double bestPhotoError = 0;
 		double bestGeoError = 0;
 		//this stores the selcted best-fit pixel's error
@@ -997,10 +999,17 @@ void GraphSLAMer::computeDepthsFromStereoPair(KeyFrame & kf, cv::Mat & image, cv
 		int y = infDepthPoint;
 		int x = leaf.position.x;
 		double yOffset = lineConst;
-		if (leaf.depth != 0)
+		if (leaf.meanDepth != 0)
 		{
-			projectWorldPointToCameraPointU(newCamMat.ptr<double>(0), newCamMat.ptr<double>(1), newCamMat.ptr<double>(2), 1, leaf.aprox3dPosition.at<double>(0, 0), leaf.aprox3dPosition.at<double>(0, 0), leaf.aprox3dPosition.at<double>(0, 0), x, y);
-			int halfSearchRange = 2 * leaf.pixelPosStD;
+			if (leaf.aprox3dPosition.cols == 0)
+			{
+				cv::Mat Pos3D(1, 3, CV_64FC1);
+				cv::Mat tPose = kf.cameraTransformationAndScaleS.getlieMatrix();
+				projectCameraPointToWorldPointP(tPose.ptr<double>(0), tPose.ptr<double>(1), tPose.ptr<double>(2), 1, leaf.position.x, leaf.position.y, leaf.meanDepth, Pos3D.ptr<double>(0)[0], Pos3D.ptr<double>(0)[1], Pos3D.ptr<double>(0)[2]);
+				leaf.aprox3dPosition = Pos3D;
+			}
+			projectWorldPointToCameraPointU(newCamMat.ptr<double>(0), newCamMat.ptr<double>(1), newCamMat.ptr<double>(2), 1, leaf.aprox3dPosition.at<double>(0, 0), leaf.aprox3dPosition.at<double>(0, 1), leaf.aprox3dPosition.at<double>(0, 2), x, y);
+			int halfSearchRange = 2 * leaf.depthDeviation * fx_d;
 			minOffset = x - halfSearchRange;
 			maxOffset = x + halfSearchRange;
 
@@ -1014,7 +1023,7 @@ void GraphSLAMer::computeDepthsFromStereoPair(KeyFrame & kf, cv::Mat & image, cv
 		double normB = b / vecSum;
 
 		//term for carrying forward the last image intensity so we can compute the epipolar gradiant
-		double lastIntensity = pimage.ptr<double>(infDepthPoint)[x];
+		double lastIntensity = pimage.ptr<double>(infDepthPoint)[minOffset];
 
 		//set y increment to move based on the relative position of our images
 		yIncrement *= direction / pixelMod;
@@ -1035,7 +1044,7 @@ void GraphSLAMer::computeDepthsFromStereoPair(KeyFrame & kf, cv::Mat & image, cv
 			//YES THANK YOU HZ
 
 
-			if (y < 1 || y >= pimage.rows - 1)
+			if (y < 1 || y >= pimage.rows - 1 || stepX < 1 || stepX >= pimage.cols)
 			{
 				break;
 			}
@@ -1043,19 +1052,19 @@ void GraphSLAMer::computeDepthsFromStereoPair(KeyFrame & kf, cv::Mat & image, cv
 			//calculate variance to see if even at our best position it's worth updating
 
 			//calc geometric error
-			double xGrad = (pimage.ptr<double>(y + 1)[x] - pimage.ptr<double>(y - 1)[x]) / 2;
-			double yGrad = (pimage.ptr<double>(y)[x + 1] - pimage.ptr<double>(y)[x - 1]) / 2;
+			double xGrad = (pimage.ptr<double>(y + 1)[stepX] - pimage.ptr<double>(y - 1)[stepX]) / 2;
+			double yGrad = (pimage.ptr<double>(y)[stepX + 1] - pimage.ptr<double>(y)[stepX - 1]) / 2;
 			geoError[goodCount] = kf.posVariance / pow((xGrad * normA + yGrad * normB), 2.0);
 
 			//calc photo. disperity error
-			double curIntensity = pimage.ptr<uchar>(y)[x];
-			double epipolarGrad = (curIntensity - lastIntensity) / 2;
-			lastIntensity = curIntensity;
+			double nextIntensity = pimage.ptr<uchar>(y + yIncrement)[stepX + 1];
+			double epipolarGrad = (nextIntensity - lastIntensity) / 2;
+			lastIntensity = pimage.ptr<double>(stepX)[y];
 			photoError[goodCount] = (2 * leaf.intensityVariance) / epipolarGrad;
 
 
 			//grab and store point on row
-			eLineVals[goodCount] = pimage.ptr<double>(stepX)[y];
+			eLineVals[goodCount] = lastIntensity;
 			eLineLocsX[goodCount] = y;
 			eLineLocsY[goodCount] = stepX;
 			goodCount++;
@@ -1087,6 +1096,7 @@ void GraphSLAMer::computeDepthsFromStereoPair(KeyFrame & kf, cv::Mat & image, cv
 				bestPosX = eLineLocsX[x] - shift;
 				bestPosY = eLineLocsY[x];
 				bestGeoError = minGeoErr;
+				bestPhotoValue = eLineVals[3 - shift] - kfPixels[3 - shift];
 				bestPhotoError = minPhotoError;
 				selectGeoError = geoError[x];
 				selectPhotoError = photoError[x];
@@ -1175,20 +1185,13 @@ void GraphSLAMer::computeDepthsFromStereoPair(KeyFrame & kf, cv::Mat & image, cv
 			kf.quadTreeLeaves[i].needsWeightUpdate = true;
 
 			//if depth is uninitialized just set it
-			if (initialize)
+			if (kf.quadTreeLeaves[i].meanDepth == 0)
 			{
-				if (isnan(depth))
-				{
-					kf.quadTreeLeaves[i].depth = 0; // undefined, no paralax
-					kf.quadTreeLeaves[i].depthDeviation = rand() + 1;//we can attenuate or strengthen sensor dependancy later
-					kf.quadTreeLeaves[i].mean = 0;
-				}
-				else
-				{
-					kf.quadTreeLeaves[i].depth = depth;
-					kf.quadTreeLeaves[i].depthDeviation = rand() + 1;//we can attenuate or strengthen sensor dependancy later
-					kf.quadTreeLeaves[i].mean = depth;
-				}
+					kf.quadTreeLeaves[i].depthDeviation = 0.9;//we can attenuate or strengthen sensor dependancy later
+					kf.quadTreeLeaves[i].meanDepth = depth;
+					kf.quadTreeLeaves[i].intensityVariance = 0.9;
+					kf.quadTreeLeaves[i].intensityMean = bestPhotoValue;
+
 			}
 			else
 			{
@@ -1199,9 +1202,10 @@ void GraphSLAMer::computeDepthsFromStereoPair(KeyFrame & kf, cv::Mat & image, cv
 				//(especially considering it's basicly the best and most strightfoward way of combining gaussian distributions like this I really am an idiot)
 				if (!isnan(depth))
 				{
-					//calc mean
 					kf.quadTreeLeaves[i].updateCount++;
-					double curMean = kf.quadTreeLeaves[i].mean;
+
+					//update depth info
+					double curMean = kf.quadTreeLeaves[i].meanDepth;
 					double curError = kf.quadTreeLeaves[i].depthDeviation;
 					double newMean = (curError * depth + obsVar * curMean) / (obsVar + curError);
 					double newVariance = (obsVar * curError) / (obsVar + curError);
@@ -1210,8 +1214,11 @@ void GraphSLAMer::computeDepthsFromStereoPair(KeyFrame & kf, cv::Mat & image, cv
 					{
 						kf.quadTreeLeaves[i].depthDeviation = kf.quadTreeLeaves[i].depthDeviation;
 					}
-					kf.quadTreeLeaves[i].mean = newMean;
-					kf.quadTreeLeaves[i].depth = depth;
+					kf.quadTreeLeaves[i].meanDepth = newMean;
+
+					//update photometric stuff
+					kf.quadTreeLeaves[i].intensityMean = (kf.quadTreeLeaves[i].intensityVariance * bestPhotoValue + bestPhotoError * kf.quadTreeLeaves[i].intensityMean) / (bestPhotoError + kf.quadTreeLeaves[i].intensityVariance);
+					kf.quadTreeLeaves[i].intensityVariance = (bestPhotoError * kf.quadTreeLeaves[i].intensityVariance) / (bestPhotoError + kf.quadTreeLeaves[i].intensityVariance);
 				}
 			}
 		}
@@ -1248,16 +1255,19 @@ void GraphSLAMer::projectDepthNodesToDepthMap(KeyFrame & kf)
 		int ySize = qtn->position.y + qtn->width;
 
 		//only set if valid
-		if (qtn->valid && qtn->needsProjecting)
+		if (qtn->valid)
 		{
-			for (; x < xSize; x++)
+			if (qtn->needsProjecting)
 			{
-				for (y = qtn->position.y; y < ySize; y++)
+				for (; x < xSize; x++)
 				{
-					kf.inverseDepthD.at<double>(x, y) = qtn->mean;
+					for (y = qtn->position.y; y < ySize; y++)
+					{
+						kf.inverseDepthD.at<double>(x, y) = qtn->meanDepth;
+					}
 				}
+				validChunks.push_back(i);
 			}
-			validChunks.push_back(i);
 		}
 		else
 		{
@@ -1414,7 +1424,7 @@ void GraphSLAMer::projectDepthNodesToDepthMap(KeyFrame & kf)
 		{
 			for (; y < ySize; y++)
 			{
-				kf.inverseDepthD.at<double>(x, y) = 1 / qtn->mean;
+				kf.inverseDepthD.at<double>(x, y) = 1 / qtn->meanDepth;
 			}
 		}
 	}
@@ -1425,16 +1435,204 @@ void GraphSLAMer::projectDepthNodesToDepthMap(KeyFrame & kf)
 //call this after quad tree creation to map the old depths to the new map as best as possible
 void GraphSLAMer::transplantDepthsToNewKeyFrame(KeyFrame & newKF, KeyFrame & oldKF)
 {
+	cv::Mat nKeyTrans = newKF.cameraTransformationAndScaleS.getlieMatrix();
+	cv::Mat oKeyTrans = oldKF.cameraTransformationAndScaleS.getlieMatrix();
+
+	double * nPosePoint0 = nKeyTrans.ptr<double>(0);
+	double * nPosePoint1 = nKeyTrans.ptr<double>(1);
+	double * nPosePoint2 = nKeyTrans.ptr<double>(2);
+
+	double * oPosePoint0 = oKeyTrans.ptr<double>(0);
+	double * oPosePoint1 = oKeyTrans.ptr<double>(1);
+	double * oPosePoint2 = oKeyTrans.ptr<double>(2);
+
+	//for storing position info
+	double x3, y3, z3 = 0;
+	int x2, y2 = 0;
+
+	double zMove = oldKF.cameraTransformationAndScaleS.getTranslation().at<double>(0, 2) - newKF.cameraTransformationAndScaleS.getTranslation().at<double>(0, 2);
+
+	//accumulate a sum of the final depths so we can normalize the mean to 1 and set the scale of our keyframe
+	double sum = 0;
+
+	for (int i = 0; i < oldKF.quadTreeNodeCount; i++)
+	{
+
+		QuadTreeNode * qtn = &oldKF.quadTreeLeaves[i];
+		int x = qtn->position.x;
+		int y = qtn->position.y;
+		int xSize = qtn->position.x + qtn->length;
+		int ySize = qtn->position.y + qtn->width;
+		double depth = qtn->depth;
+
+		//might be worth setting up an epipolar line and incrementing over it, but for now this
+		if (qtn->valid)
+		{
+			for (; x < xSize; x++)
+			{
+				for (y = qtn->position.y; y < ySize; y++)
+				{
+					projectCameraPointToWorldPointP(oPosePoint0, oPosePoint1, oPosePoint2, 1, x, y, depth, x3, y3, z3);
+					projectWorldPointToCameraPointU(nPosePoint0, nPosePoint1, nPosePoint2, 1, x3, y3, z3, x2, y2);
+
+					//bounds check
+					if (x2 < 0 || y2 < 0 || x2 >= newKF.inverseDepthD.rows || y2 >= newKF.inverseDepthD.cols) continue;
+
+					//approximatley correct(?), Maybe we should grab the angular components of x and y as well
+					double newDepth = depth - zMove;
+					double newVariance = pow((newDepth/depth),4) * qtn->depthDeviation + qtn->intensityVariance;
+
+					//if we have no current entry just assign
+					if (newKF.inverseDepthD.at<double>(x2, y2) == 0)
+					{
+						newKF.inverseDepthD.at<double>(x2, y2) = newDepth;
+						newKF.depthVarianceV.at<double>(x2, y2) = newVariance;
+					}
+					else if (newKF.inverseDepthD.at<double>(x2, y2) != newDepth) //if an entry is already here
+					{
+						double curDepth = newKF.inverseDepthD.at<double>(x2, y2);
+						double curVar = newKF.depthVarianceV.at<double>(x2, y2);
+						if (abs(depth - newKF.inverseDepthD.at<double>(x2, y2)) < 2 * newKF.depthVarianceV.at<double>(x2, y2))
+						{
+							//if the depth is within 2 standard deviations(95% of guassian range) then we assume it's the same point with some noise applied, treat it like a new observation
+							newKF.inverseDepthD.at<double>(x2, y2) = (curVar * newDepth + newVariance * curDepth) / (newVariance + curVar);
+							newKF.depthVarianceV.at<double>(x2, y2) = (newVariance * curVar) / (newVariance + curVar);
+						}
+						else
+						{
+							//otherwise we take the nearest point to the camera, assuming occlusion
+							if (newDepth < curDepth)
+							{
+								newKF.inverseDepthD.at<double>(x2, y2) = newDepth;
+								newKF.depthVarianceV.at<double>(x2, y2) = newVariance;
+							}
+						}
+					}
+					else if (newKF.depthVarianceV.at<double>(x2, y2) > newVariance) //snag the new variance if we can from an equally far but more well known point(this probably won't happen really but it't worth a test I think?)
+					{
+						newKF.depthVarianceV.at<double>(x2, y2) = newVariance;
+					}
+					
+				}
+			}
+		}
+	}
+
+
+	//iterate over each leaf in the new kf and get its depth from the depth map
+	for (int i = 0; i < newKF.quadTreeNodeCount; i++)
+	{
+		//for saving us from looping over the entire vector sets each time we want to check a depth
+		double lastDepth = 0;
+		double lastIndex = -1;
+
+		//for storing storing sub-region changes in depth and variance
+		std::vector<double> depths;
+		std::vector<double> variances;
+		std::vector<double> count;
+
+		QuadTreeNode * qtn = &oldKF.quadTreeLeaves[i];
+		int x = qtn->position.x;
+		int y = qtn->position.y;
+		int xSize = qtn->position.x + qtn->length;
+		int ySize = qtn->position.y + qtn->width;
+		double depth = qtn->depth;
+
+		//might be worth setting up an epipolar line and incrementing over it, but for now this
+		if (qtn->valid)
+		{
+			for (; x < xSize; x++)
+			{
+				for (y = qtn->position.y; y < ySize; y++)
+				{
+					
+					if (newKF.inverseDepthD.at<double>(x, y) != lastDepth)
+					{
+						lastDepth = newKF.inverseDepthD.at<double>(x, y);
+						int index = 0;
+						for (; index < depths.size(); index++)
+						{
+							//if we find an existing match 
+							if (depths[index] == depth)
+							{
+								count[index]++;
+								lastIndex = index;
+								break;
+							}
+						}
+
+						if (index == depths.size())//we had no match
+						{
+							depths.push_back(depth);
+							variances.push_back(newKF.depthVarianceV.at<double>(x, y));
+							count.push_back(1);
+						}
+					}
+					else
+					{
+						count[lastIndex]++;
+					}
+				}
+			}
+
+			//using the gathered sub-pixel data we need to get a single value for the node
+			//the largest case where we will have subpixels is when there's a loss of data from the camera moving to far away to resolve details
+			//in which case our values SHOULD be close together since its the same surface(probably) and we can fuse using the above kalman method
+			//if there exists one outside the 95% interval and it is in the minority it's probably an outlier and we can ignore it
+			//first grab our highest occuring index
+			int highCount = 0;
+			int highIndex = 0;
+			for (int j = 0; j < count.size(); j++)
+			{
+				if (count[j] > highCount)
+				{
+					highCount = count[j];
+					highIndex = j;
+				}
+			}
+
+			double resDepth = depths[highIndex];
+			double resVar = variances[highIndex];
+
+			for (int j = 0; j < depths.size(); j++)
+			{
+				if (j == highIndex) continue;
+
+				double newDepth = depths[j];
+				double newVar = variances[j];
+				if (abs(resDepth - newDepth) < 2 * resVar)
+				{
+					//if the depth is within 2 standard deviations(95% of guassian range) then we assume it's the same point with some noise applied, treat it like a new observation
+					resDepth = (resVar * newDepth + newVar * resDepth) / (newVar + resVar);
+					resVar = (newVar * resVar) / (newVar + resVar);
+				}
+			}
+
+			//last but not least actually assign the depths
+			qtn->depth = resDepth;
+			qtn->depthDeviation = resVar;
+			sum += resDepth * (qtn->width * qtn->length);
+		}
+	}
+
+	//normailze depth mean to 1 and set the scale of our key frame
+	double scale = sum / (newKF.scaledImageI.rows * newKF.scaledImageI.cols);
+	//iterate over each leaf in the new kf and get its depth from the depth map
 	for (int i = 0; i < newKF.quadTreeNodeCount; i++)
 	{
 
+		QuadTreeNode * qtn = &oldKF.quadTreeLeaves[i];
+		qtn->meanDepth /= scale;
+		qtn->depthDeviation /= scale;
 	}
+	newKF.cameraTransformationAndScaleS.setScale(scale);
 }
 
 //The main function for LS Graph SLAM. Takes input in the form of camera frames, and returns a matrix with the approximate position of the camera. 
 //Also builds a map behind the scenes for which the point cloud can be accessed by the helper functions
 //enhanced implementation of https://groups.csail.mit.edu/rrg/papers/greene_icra16.pdf
 //actually not to fond of that paper so now it's based on many different generic SLAM and photometric reconstruction algos
+//seriously that paper is not clear on a lot of things I had to take 4 university courses
 //K: is a 3x3 real mat with the camera parameters
 //pi: perspective projection function
 double increment = 0;
@@ -1473,15 +1671,15 @@ GraphSLAMer::SIM3 GraphSLAMer::LS_Graph_SLAM(cv::Mat cameraFrame)
 
 
 		//set variance to one
-		newKey.inverseDepthD = cv::Mat::zeros(cameraFrame.rows, cameraFrame.cols, CV_64FC1);
+		newKey.inverseDepthD = cv::Mat::ones(cameraFrame.rows, cameraFrame.cols, CV_64FC1);
 
 		//computes the power tree for the image, allowing for fast analysis 
-		ComputeQuadtreeForKeyframe(newKey);
+		ConstructQuadtreeForKeyframe(newKey);
 
 		//construct depth quadtrees based on the stereo pairs
 		computeDepthsFromStereoPair(newKey, lastKey.scaledImageI, cameraParams, lastKey.cameraTransformationAndScaleS);
 
-		newKey.depthVarianceV = cv::Mat::ones(cameraFrame.rows, cameraFrame.cols, CV_64FC1);
+		newKey.depthVarianceV = cv::Mat::zeros(cameraFrame.rows, cameraFrame.cols, CV_64FC1);
 
 		//convert the nodes into a pixel map AND create information amtrix
 		projectDepthNodesToDepthMap(newKey);
@@ -1523,7 +1721,7 @@ void GraphSLAMer::Initialize_LS_Graph_SLAM(cv::Mat cameraFrame, cv::Mat cameraFr
 	newKey.origImage = cameraFrame;
 
 	//computes the power tree for the image, allowing for fast analysis 
-	ComputeQuadtreeForKeyframe(newKey);
+	ConstructQuadtreeForKeyframe(newKey);
 
 
 	SIM3 position;
